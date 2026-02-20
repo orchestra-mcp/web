@@ -42,6 +42,7 @@ class GitHubSponsorsController extends Controller
         return response()->json(['message' => 'Processed']);
     }
 
+    /** @param array<string, mixed> $sponsorship */
     private function handleCreated(User $user, array $sponsorship): void
     {
         $tier = $sponsorship['tier'] ?? [];
@@ -67,6 +68,7 @@ class GitHubSponsorsController extends Controller
         $user->subscription?->update(['status' => 'cancelled']);
     }
 
+    /** @param array<string, mixed> $sponsorship */
     private function handleTierChanged(User $user, array $sponsorship): void
     {
         $tier = $sponsorship['tier'] ?? [];
