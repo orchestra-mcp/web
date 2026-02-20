@@ -48,4 +48,23 @@ return [
         'redirect' => env('APP_URL').'/auth/google/callback',
     ],
 
+    'discord' => [
+        'client_id' => env('DISCORD_CLIENT_ID'),
+        'client_secret' => env('DISCORD_CLIENT_SECRET'),
+        'redirect' => env('APP_URL').'/auth/discord/callback',
+    ],
+
+    // Desktop integration OAuth (not user login — passes code back to desktop app)
+    'notion' => [
+        'client_id' => env('NOTION_CLIENT_ID'),
+        'client_secret' => env('NOTION_CLIENT_SECRET'),
+        'redirect' => env('NOTION_REDIRECT_URI', env('APP_URL').'/auth/notion/callback'),
+    ],
+
+    'google-calendar' => [
+        'client_id' => env('GOOGLE_CALENDAR_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CALENDAR_CLIENT_SECRET'),
+        'redirect' => env('GOOGLE_CALENDAR_REDIRECT_URI', env('APP_URL').'/auth/google-calendar/callback'),
+    ],
+
 ];

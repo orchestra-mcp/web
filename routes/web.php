@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\Admin;
 use App\Http\Controllers\Auth\SetPasswordController;
+use App\Http\Controllers\Auth\DesktopAuthController;
 use App\Http\Controllers\Auth\SocialAuthController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\NotificationController;
@@ -14,7 +15,12 @@ use Inertia\Inertia;
 Route::get('/', [HomeController::class, 'index'])->name('home');
 Route::get('/page/{slug}', [HomeController::class, 'show'])->name('page.show');
 
-// Dynamic social auth (any provider)
+// Desktop integration OAuth callbacks (forwards code to local desktop app, not user login)
+Route::get('/auth/{provider}/callback', [DesktopAuthController::class, 'callback'])
+    ->whereIn('provider', ['notion', 'google-calendar'])
+    ->name('auth.desktop.callback');
+
+// Dynamic social auth (user login via Socialite)
 Route::get('/auth/{provider}', [SocialAuthController::class, 'redirect'])->name('auth.social');
 Route::get('/auth/{provider}/callback', [SocialAuthController::class, 'callback'])->name('auth.social.callback');
 

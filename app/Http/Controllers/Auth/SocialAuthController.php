@@ -13,7 +13,7 @@ use Laravel\Socialite\Facades\Socialite;
 class SocialAuthController extends Controller
 {
     /** @var list<string> */
-    private array $allowedProviders = ['github', 'google'];
+    private array $allowedProviders = ['github', 'google', 'discord'];
 
     public function redirect(string $provider): RedirectResponse|\Symfony\Component\HttpFoundation\Response
     {
