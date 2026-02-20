@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Auth;
 
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 
 /**
  * Handles OAuth callbacks for desktop app integrations.
@@ -24,7 +25,7 @@ class DesktopAuthController extends Controller
     /** @var list<string> Providers handled by this controller (desktop integrations) */
     private array $providers = ['notion', 'google-calendar'];
 
-    public function callback(Request $request, string $provider)
+    public function callback(Request $request, string $provider): Response
     {
         if (! in_array($provider, $this->providers)) {
             abort(404, "Provider [{$provider}] is not supported for desktop auth.");
@@ -60,7 +61,7 @@ class DesktopAuthController extends Controller
             'providerLabel' => $this->providerLabel($provider),
             'success' => true,
             'code' => $code,
-            'localCallbackUrl' => 'http://127.0.0.1:19191' . ($apiPaths[$provider] ?? ''),
+            'localCallbackUrl' => 'http://127.0.0.1:19191'.($apiPaths[$provider] ?? ''),
         ]);
     }
 

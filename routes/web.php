@@ -1,8 +1,8 @@
 <?php
 
 use App\Http\Controllers\Admin;
-use App\Http\Controllers\Auth\SetPasswordController;
 use App\Http\Controllers\Auth\DesktopAuthController;
+use App\Http\Controllers\Auth\SetPasswordController;
 use App\Http\Controllers\Auth\SocialAuthController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\NotificationController;
