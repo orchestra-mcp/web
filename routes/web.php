@@ -30,10 +30,15 @@ Route::middleware('auth')->group(function () {
     Route::post('/set-password', [SetPasswordController::class, 'store'])->name('set-password.store');
 });
 
-// Authenticated (password required, user active)
+// Authenticated (password required, user active) — subscription check page accessible without subscription
 Route::middleware(['auth', 'verified', 'password.set', 'user.active'])->group(function () {
-    Route::get('/dashboard', fn () => Inertia::render('dashboard'))->name('dashboard');
+    Route::get('/subscribe', [SubscriptionController::class, 'subscribe'])->name('subscribe');
     Route::get('/subscription', [SubscriptionController::class, 'show'])->name('subscription');
+});
+
+// Authenticated + active subscription required (or admin bypass)
+Route::middleware(['auth', 'verified', 'password.set', 'user.active', 'subscribed'])->group(function () {
+    Route::get('/dashboard', fn () => Inertia::render('dashboard'))->name('dashboard');
     Route::get('/notifications', [NotificationController::class, 'index'])->name('notifications.index');
     Route::post('/notifications/{id}/read', [NotificationController::class, 'markRead'])->name('notifications.read');
 });

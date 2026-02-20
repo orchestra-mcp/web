@@ -24,7 +24,7 @@ class TestUserSeeder extends Seeder
         );
         $subscriber->assignRole('subscriber');
         $subscriber->subscription()->firstOrCreate([], [
-            'plan' => 'pro',
+            'plan' => 'sponsor',
             'status' => 'active',
             'start_date' => now(),
             'end_date' => now()->addYear(),

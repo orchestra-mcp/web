@@ -76,8 +76,8 @@ export default function SubscriptionEdit({ subscription }: Props) {
                                         </SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="free">Free</SelectItem>
-                                            <SelectItem value="pro">Pro</SelectItem>
-                                            <SelectItem value="team">Team</SelectItem>
+                                            <SelectItem value="sponsor">Sponsor</SelectItem>
+                                            <SelectItem value="team_sponsor">Team Sponsor</SelectItem>
                                         </SelectContent>
                                     </Select>
                                     <InputError message={errors.plan} />

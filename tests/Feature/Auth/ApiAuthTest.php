@@ -2,8 +2,8 @@
 
 use App\Models\User;
 
-test('user can login via API and receive token', function () {
-    $user = User::factory()->create();
+test('user with subscription can login via API and receive token', function () {
+    $user = User::factory()->withSubscription()->create();
 
     $response = $this->postJson('/api/auth/login', [
         'email' => $user->email,
@@ -12,6 +12,18 @@ test('user can login via API and receive token', function () {
 
     $response->assertOk()
         ->assertJsonStructure(['token']);
+});
+
+test('user without subscription cannot login via API', function () {
+    $user = User::factory()->create();
+
+    $response = $this->postJson('/api/auth/login', [
+        'email' => $user->email,
+        'password' => 'password',
+    ]);
+
+    $response->assertUnprocessable()
+        ->assertJsonPath('errors.email.0', 'An active GitHub Sponsors subscription is required. Visit the web app to subscribe.');
 });
 
 test('blocked user cannot login via API', function () {

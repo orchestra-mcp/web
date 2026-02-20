@@ -103,6 +103,22 @@ class User extends Authenticatable implements HasMedia, MustVerifyEmail
         return ! $this->password_set;
     }
 
+    public function isSponsor(): bool
+    {
+        return $this->subscription?->isSponsor() ?? false;
+    }
+
+    public function hasActiveSubscription(): bool
+    {
+        $sub = $this->subscription;
+
+        if (! $sub) {
+            return false;
+        }
+
+        return in_array($sub->plan, ['sponsor', 'team_sponsor']) && $sub->isActive();
+    }
+
     /** @param Builder<User> $query */
     public function scopeActive(Builder $query): void
     {

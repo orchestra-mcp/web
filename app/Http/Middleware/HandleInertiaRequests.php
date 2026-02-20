@@ -44,6 +44,7 @@ class HandleInertiaRequests extends Middleware
                 'user' => $user?->load('roles', 'subscription'),
                 'notifications' => $user?->unreadNotifications()->take(10)->get(),
                 'isAdmin' => $user?->isAdmin() ?? false,
+                'hasActiveSubscription' => $user?->hasActiveSubscription() ?? false,
             ],
             'flash' => [
                 'success' => $request->session()->get('success'),

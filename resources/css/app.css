@@ -64,7 +64,7 @@
 }
 
 :root {
-    /* Brand colors: cyan #00e5ff → purple #a900ff */
+    /* Brand colors: cyan #00e5ff -> purple #a900ff */
     --brand-cyan: #00e5ff;
     --brand-purple: #a900ff;
     --brand-gradient: linear-gradient(135deg, #00e5ff, #a900ff);
@@ -166,6 +166,79 @@
         -webkit-text-fill-color: transparent;
         background-clip: text;
     }
+
+    /* Glass-morphism effect */
+    .glass {
+        background: oklch(1 0 0 / 0.6);
+        backdrop-filter: blur(16px) saturate(1.8);
+        -webkit-backdrop-filter: blur(16px) saturate(1.8);
+    }
+
+    .dark .glass {
+        background: oklch(0.145 0 0 / 0.6);
+    }
+
+    /* Glass card — slightly more opaque for card surfaces */
+    .glass-card {
+        background: oklch(1 0 0 / 0.5);
+        backdrop-filter: blur(12px) saturate(1.6);
+        -webkit-backdrop-filter: blur(12px) saturate(1.6);
+    }
+
+    .dark .glass-card {
+        background: oklch(0.18 0.01 295 / 0.4);
+    }
+
+    /* Brand gradient border using the mask/pseudo-element technique */
+    .brand-border-gradient {
+        position: relative;
+        border: 1px solid transparent;
+        background-clip: padding-box;
+    }
+
+    .brand-border-gradient::before {
+        content: '';
+        position: absolute;
+        inset: -1px;
+        border-radius: inherit;
+        background: linear-gradient(135deg, #00e5ff, #a900ff);
+        z-index: -1;
+        opacity: 0;
+        transition: opacity 0.3s ease;
+    }
+
+    .brand-border-gradient:hover::before {
+        opacity: 1;
+    }
+
+    /* Always-visible gradient border */
+    .brand-border-gradient-on::before {
+        opacity: 1;
+    }
+
+    /* Brand glow — subtle brand-colored box-shadow */
+    .brand-glow {
+        box-shadow:
+            0 0 20px oklch(0.7 0.25 295 / 0.15),
+            0 0 60px oklch(0.82 0.19 195 / 0.08);
+    }
+
+    .brand-glow-strong {
+        box-shadow:
+            0 0 30px oklch(0.7 0.25 295 / 0.25),
+            0 0 80px oklch(0.82 0.19 195 / 0.12);
+    }
+
+    /* Gradient ring for agent avatars */
+    .gradient-ring {
+        background: linear-gradient(135deg, #00e5ff, #a900ff);
+        padding: 2px;
+    }
+
+    .gradient-ring > * {
+        background: var(--background);
+        border-radius: inherit;
+    }
 }
 
 @layer components {
@@ -202,16 +275,16 @@
 
     .stagger-children.is-visible > *:nth-child(1) { transition-delay: 0ms; opacity: 1; transform: translateY(0); }
     .stagger-children.is-visible > *:nth-child(2) { transition-delay: 60ms; opacity: 1; transform: translateY(0); }
-    .stagger-children.is-visible > *:nth-child(3) { transition-delay: 120ms; opacity: 1; transform: translateY(0); }
-    .stagger-children.is-visible > *:nth-child(4) { transition-delay: 180ms; opacity: 1; transform: translateY(0); }
-    .stagger-children.is-visible > *:nth-child(5) { transition-delay: 240ms; opacity: 1; transform: translateY(0); }
-    .stagger-children.is-visible > *:nth-child(6) { transition-delay: 300ms; opacity: 1; transform: translateY(0); }
-    .stagger-children.is-visible > *:nth-child(7) { transition-delay: 360ms; opacity: 1; transform: translateY(0); }
-    .stagger-children.is-visible > *:nth-child(8) { transition-delay: 420ms; opacity: 1; transform: translateY(0); }
-    .stagger-children.is-visible > *:nth-child(9) { transition-delay: 480ms; opacity: 1; transform: translateY(0); }
-    .stagger-children.is-visible > *:nth-child(10) { transition-delay: 540ms; opacity: 1; transform: translateY(0); }
-    .stagger-children.is-visible > *:nth-child(11) { transition-delay: 600ms; opacity: 1; transform: translateY(0); }
-    .stagger-children.is-visible > *:nth-child(12) { transition-delay: 660ms; opacity: 1; transform: translateY(0); }
+    .stagger-children.is-visible > *:nth-child(3) { transition-delay: 80ms; opacity: 1; transform: translateY(0); }
+    .stagger-children.is-visible > *:nth-child(4) { transition-delay: 120ms; opacity: 1; transform: translateY(0); }
+    .stagger-children.is-visible > *:nth-child(5) { transition-delay: 160ms; opacity: 1; transform: translateY(0); }
+    .stagger-children.is-visible > *:nth-child(6) { transition-delay: 200ms; opacity: 1; transform: translateY(0); }
+    .stagger-children.is-visible > *:nth-child(7) { transition-delay: 240ms; opacity: 1; transform: translateY(0); }
+    .stagger-children.is-visible > *:nth-child(8) { transition-delay: 280ms; opacity: 1; transform: translateY(0); }
+    .stagger-children.is-visible > *:nth-child(9) { transition-delay: 320ms; opacity: 1; transform: translateY(0); }
+    .stagger-children.is-visible > *:nth-child(10) { transition-delay: 360ms; opacity: 1; transform: translateY(0); }
+    .stagger-children.is-visible > *:nth-child(11) { transition-delay: 400ms; opacity: 1; transform: translateY(0); }
+    .stagger-children.is-visible > *:nth-child(12) { transition-delay: 440ms; opacity: 1; transform: translateY(0); }
 
     /* Hero entry animation (plays on load) */
     @keyframes fade-in-up {
@@ -224,4 +297,244 @@
     .animate-fade-in-up-d2 { animation: fade-in-up 0.8s ease-out 0.3s both; }
     .animate-fade-in-up-d3 { animation: fade-in-up 0.8s ease-out 0.45s both; }
     .animate-fade-in-up-d4 { animation: fade-in-up 0.8s ease-out 0.6s both; }
+    .animate-fade-in-up-d5 { animation: fade-in-up 0.8s ease-out 0.75s both; }
+
+    /* ── Hero mesh gradient background ── */
+    @keyframes hero-mesh {
+        0%, 100% {
+            background-position: 0% 50%;
+            opacity: 0.6;
+        }
+        25% {
+            background-position: 50% 0%;
+            opacity: 0.8;
+        }
+        50% {
+            background-position: 100% 50%;
+            opacity: 0.5;
+        }
+        75% {
+            background-position: 50% 100%;
+            opacity: 0.7;
+        }
+    }
+
+    .hero-mesh-bg {
+        background:
+            radial-gradient(ellipse 80% 50% at 20% 40%, oklch(0.82 0.19 195 / 0.12), transparent),
+            radial-gradient(ellipse 60% 60% at 70% 30%, oklch(0.55 0.27 295 / 0.10), transparent),
+            radial-gradient(ellipse 50% 70% at 50% 70%, oklch(0.7 0.25 295 / 0.06), transparent);
+        background-size: 200% 200%;
+        animation: hero-mesh 20s ease-in-out infinite;
+    }
+
+    .dark .hero-mesh-bg {
+        background:
+            radial-gradient(ellipse 80% 50% at 20% 40%, oklch(0.82 0.19 195 / 0.08), transparent),
+            radial-gradient(ellipse 60% 60% at 70% 30%, oklch(0.55 0.27 295 / 0.07), transparent),
+            radial-gradient(ellipse 50% 70% at 50% 70%, oklch(0.7 0.25 295 / 0.04), transparent);
+        background-size: 200% 200%;
+        animation: hero-mesh 20s ease-in-out infinite;
+    }
+
+    /* Hero floating orbs */
+    @keyframes orb-float {
+        0%, 100% { transform: translate(0, 0) scale(1); }
+        33% { transform: translate(30px, -20px) scale(1.05); }
+        66% { transform: translate(-20px, 15px) scale(0.95); }
+    }
+
+    .hero-orb {
+        position: absolute;
+        border-radius: 50%;
+        filter: blur(60px);
+        animation: orb-float 15s ease-in-out infinite;
+        pointer-events: none;
+    }
+
+    .hero-orb-cyan {
+        background: oklch(0.82 0.19 195 / 0.15);
+    }
+
+    .hero-orb-purple {
+        background: oklch(0.55 0.27 295 / 0.12);
+        animation-delay: -5s;
+        animation-direction: reverse;
+    }
+
+    .dark .hero-orb-cyan {
+        background: oklch(0.82 0.19 195 / 0.08);
+    }
+
+    .dark .hero-orb-purple {
+        background: oklch(0.55 0.27 295 / 0.06);
+    }
+
+    /* ── Shimmer / shine animation for CTA ── */
+    @keyframes shimmer {
+        0% { transform: translateX(-100%); }
+        100% { transform: translateX(100%); }
+    }
+
+    .shimmer {
+        position: relative;
+        overflow: hidden;
+    }
+
+    .shimmer::after {
+        content: '';
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+            105deg,
+            transparent 40%,
+            oklch(1 0 0 / 0.12) 45%,
+            oklch(1 0 0 / 0.2) 50%,
+            oklch(1 0 0 / 0.12) 55%,
+            transparent 60%
+        );
+        animation: shimmer 3s ease-in-out infinite;
+        pointer-events: none;
+    }
+
+    /* ── Pulse glow for highlighted pricing card ── */
+    @keyframes pulse-glow {
+        0%, 100% {
+            box-shadow:
+                0 0 20px oklch(0.7 0.25 295 / 0.15),
+                0 0 60px oklch(0.82 0.19 195 / 0.08);
+        }
+        50% {
+            box-shadow:
+                0 0 30px oklch(0.7 0.25 295 / 0.25),
+                0 0 80px oklch(0.82 0.19 195 / 0.15);
+        }
+    }
+
+    .animate-pulse-glow {
+        animation: pulse-glow 3s ease-in-out infinite;
+    }
+
+    /* ── Nav active link underline (brand gradient) ── */
+    .nav-link-gradient {
+        position: relative;
+    }
+
+    .nav-link-gradient::after {
+        content: '';
+        position: absolute;
+        left: 0;
+        right: 0;
+        bottom: -4px;
+        height: 2px;
+        background: linear-gradient(135deg, #00e5ff, #a900ff);
+        transform: scaleX(0);
+        transform-origin: center;
+        transition: transform 0.3s ease;
+        border-radius: 1px;
+    }
+
+    .nav-link-gradient:hover::after {
+        transform: scaleX(1);
+    }
+
+    /* ── Terminal mockup styles ── */
+    .terminal-window {
+        background: oklch(0.16 0.005 285 / 0.95);
+        border: 1px solid oklch(0.3 0.02 295 / 0.5);
+        border-radius: 0.75rem;
+        overflow: hidden;
+        box-shadow:
+            0 25px 50px oklch(0 0 0 / 0.25),
+            0 0 0 1px oklch(1 0 0 / 0.05) inset;
+    }
+
+    .terminal-header {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 12px 16px;
+        background: oklch(0.2 0.005 285 / 0.9);
+        border-bottom: 1px solid oklch(0.3 0.02 295 / 0.3);
+    }
+
+    .terminal-dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+    }
+
+    .terminal-body {
+        padding: 16px 20px;
+        font-family: 'JetBrains Mono', 'Fira Code', 'SF Mono', monospace;
+        font-size: 13px;
+        line-height: 1.7;
+        color: oklch(0.85 0 0);
+    }
+
+    .terminal-body .t-cyan { color: #00e5ff; }
+    .terminal-body .t-purple { color: #c040ff; }
+    .terminal-body .t-green { color: oklch(0.75 0.18 155); }
+    .terminal-body .t-dim { color: oklch(0.55 0 0); }
+    .terminal-body .t-white { color: oklch(0.95 0 0); }
+
+    /* Typing cursor blink */
+    @keyframes blink-cursor {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
+    }
+
+    .typing-cursor {
+        display: inline-block;
+        width: 8px;
+        height: 16px;
+        background: #00e5ff;
+        margin-left: 2px;
+        vertical-align: text-bottom;
+        animation: blink-cursor 1s step-end infinite;
+    }
+
+    /* ── CTA section animated gradient background ── */
+    @keyframes cta-gradient-shift {
+        0%, 100% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+    }
+
+    .cta-gradient-bg {
+        background: linear-gradient(135deg, #00e5ff, #6b00cc, #a900ff, #00e5ff);
+        background-size: 300% 300%;
+        animation: cta-gradient-shift 8s ease-in-out infinite;
+    }
+
+    /* ── Grid dot pattern for hero ── */
+    .hero-grid-pattern {
+        background-image:
+            radial-gradient(circle at 1px 1px, oklch(0.55 0.27 295 / 0.07) 1px, transparent 0);
+        background-size: 40px 40px;
+    }
+
+    .dark .hero-grid-pattern {
+        background-image:
+            radial-gradient(circle at 1px 1px, oklch(0.55 0.27 295 / 0.12) 1px, transparent 0);
+    }
+
+    /* ── Tech stack horizontal scroll snap ── */
+    .tech-scroll {
+        display: flex;
+        gap: 12px;
+        overflow-x: auto;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: none;
+        -ms-overflow-style: none;
+        padding-bottom: 4px;
+    }
+
+    .tech-scroll::-webkit-scrollbar {
+        display: none;
+    }
+
+    .tech-scroll > * {
+        scroll-snap-align: start;
+        flex-shrink: 0;
+    }
 }

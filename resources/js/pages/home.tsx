@@ -159,6 +159,8 @@ const techStack = [
     { icon: 'bx bxl-google-cloud', label: 'GCP', desc: 'Cloud Run + CDN' },
 ];
 
+const GITHUB_SPONSORS_URL = 'https://github.com/sponsors/fadymondy';
+
 const plans = [
     {
         name: 'Free',
@@ -173,13 +175,14 @@ const plans = [
             'SQLite local storage',
         ],
         cta: 'Get Started',
+        ctaHref: 'register' as const,
         highlighted: false,
     },
     {
-        name: 'Pro',
+        name: 'Sponsor',
         price: '$5',
         period: '/month',
-        description: 'For power users who want the full experience.',
+        description: 'Support the project and unlock the full experience.',
         features: [
             'Everything in Free',
             'Cloud AI (Claude + GPT)',
@@ -188,23 +191,25 @@ const plans = [
             'Priority support',
             'All 26 themes',
         ],
-        cta: 'Start Pro',
+        cta: 'Sponsor on GitHub',
+        ctaHref: 'github' as const,
         highlighted: true,
     },
     {
-        name: 'Team',
+        name: 'Team Sponsor',
         price: '$25',
         period: '/month',
-        description: 'For teams building together.',
+        description: 'For teams building together. Sponsor at a higher tier.',
         features: [
-            'Everything in Pro',
+            'Everything in Sponsor',
             'Team collaboration',
             'Admin panel & analytics',
             'Custom extensions',
             'Shared workspaces',
             'SLA & dedicated support',
         ],
-        cta: 'Start Team',
+        cta: 'Sponsor on GitHub',
+        ctaHref: 'github' as const,
         highlighted: false,
     },
 ];
@@ -222,34 +227,41 @@ function NavHeader() {
     const { auth } = usePage().props;
 
     return (
-        <header className="sticky top-0 z-50 w-full border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+        <header className="glass sticky top-0 z-50 w-full border-b border-border/50">
             <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-4 sm:px-6 lg:px-8">
                 <Link
                     href="/"
-                    className="flex items-center gap-2 text-lg font-bold tracking-tight text-foreground"
+                    className="flex items-center gap-2.5 text-lg font-bold tracking-tight text-foreground"
                 >
                     <AppLogoIcon className="size-7" />
-                    Orchestra MCP
+                    <span>Orchestra MCP</span>
                 </Link>
-                <nav className="hidden items-center gap-6 text-sm font-medium text-muted-foreground md:flex">
+                <nav className="hidden items-center gap-8 text-sm font-medium text-muted-foreground md:flex">
                     <a
                         href="#features"
                         onClick={handleAnchorClick}
-                        className="transition-colors hover:text-foreground"
+                        className="nav-link-gradient transition-colors hover:text-foreground"
                     >
                         Features
                     </a>
                     <a
+                        href="#agents"
+                        onClick={handleAnchorClick}
+                        className="nav-link-gradient transition-colors hover:text-foreground"
+                    >
+                        Agents
+                    </a>
+                    <a
                         href="#tech"
                         onClick={handleAnchorClick}
-                        className="transition-colors hover:text-foreground"
+                        className="nav-link-gradient transition-colors hover:text-foreground"
                     >
                         Tech Stack
                     </a>
                     <a
                         href="#pricing"
                         onClick={handleAnchorClick}
-                        className="transition-colors hover:text-foreground"
+                        className="nav-link-gradient transition-colors hover:text-foreground"
                     >
                         Pricing
                     </a>
@@ -264,7 +276,11 @@ function NavHeader() {
                             <Button asChild variant="ghost" size="sm">
                                 <Link href={login()}>Log in</Link>
                             </Button>
-                            <Button asChild size="sm">
+                            <Button
+                                asChild
+                                size="sm"
+                                className="brand-gradient border-0 text-white shadow-md hover:opacity-90"
+                            >
                                 <Link href={register()}>Get Started</Link>
                             </Button>
                         </>
@@ -277,71 +293,139 @@ function NavHeader() {
 
 function HeroSection() {
     return (
-        <section className="relative overflow-hidden py-24 sm:py-32 lg:py-40">
-            <div className="absolute inset-0 -z-10 bg-[radial-gradient(ellipse_at_top,oklch(0.55_0.27_295/0.08),oklch(0.82_0.19_195/0.04),transparent)]" />
-            <div className="mx-auto max-w-7xl px-4 text-center sm:px-6 lg:px-8">
-                <div className="animate-fade-in-up">
-                    <Badge
-                        variant="secondary"
-                        className="mb-6 px-4 py-1.5 text-sm"
-                    >
-                        <i className="bx bx-rocket mr-1.5" />
-                        AI-Agentic IDE for Every Platform
-                    </Badge>
-                </div>
-                <h1 className="animate-fade-in-up-d1 mx-auto max-w-5xl text-5xl font-extrabold tracking-tight text-foreground sm:text-6xl lg:text-7xl">
-                    Build Smarter with{' '}
-                    <span className="brand-gradient-text">
-                        Orchestra MCP
-                    </span>
-                </h1>
-                <p className="animate-fade-in-up-d2 mx-auto mt-6 max-w-3xl text-lg leading-8 text-muted-foreground sm:text-xl">
-                    The AI-powered desktop IDE that brings 16 specialized
-                    agents, 57 project management tools, and a blazing-fast
-                    Rust engine to macOS, Windows, and Linux.
-                </p>
-                <div className="animate-fade-in-up-d3 mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-                    <Button asChild size="lg" className="gap-2 px-8 text-base">
-                        <Link href={register()}>
-                            <i className="bx bx-download" />
-                            Get Started Free
-                        </Link>
-                    </Button>
-                    <Button
-                        asChild
-                        variant="outline"
-                        size="lg"
-                        className="gap-2 px-8 text-base"
-                    >
-                        <a href="#features" onClick={handleAnchorClick}>
-                            <i className="bx bx-play-circle" />
-                            See Features
-                        </a>
-                    </Button>
+        <section className="relative overflow-hidden py-28 sm:py-36 lg:py-44">
+            {/* Animated mesh gradient background */}
+            <div className="hero-mesh-bg absolute inset-0 -z-20" />
+
+            {/* Dot grid pattern overlay */}
+            <div className="hero-grid-pattern absolute inset-0 -z-10" />
+
+            {/* Floating orbs */}
+            <div className="hero-orb hero-orb-cyan absolute -left-32 top-1/4 h-96 w-96" />
+            <div className="hero-orb hero-orb-purple absolute -right-32 bottom-1/4 h-80 w-80" />
+
+            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+                <div className="text-center">
+                    <div className="animate-fade-in-up">
+                        <Badge
+                            variant="secondary"
+                            className="mb-8 border border-border/50 px-4 py-1.5 text-sm shadow-sm"
+                        >
+                            <i className="bx bx-rocket mr-1.5 text-primary" />
+                            Now in Public Beta
+                        </Badge>
+                    </div>
+                    <h1 className="animate-fade-in-up-d1 mx-auto max-w-5xl text-5xl font-extrabold tracking-tight text-foreground sm:text-6xl lg:text-7xl xl:text-8xl">
+                        The IDE that{' '}
+                        <span className="brand-gradient-text">
+                            thinks with you
+                        </span>
+                    </h1>
+                    <p className="animate-fade-in-up-d2 mx-auto mt-8 max-w-2xl text-lg leading-relaxed text-muted-foreground sm:text-xl">
+                        16 AI agents. 57 project tools. A Rust-powered engine.
+                        One unified desktop IDE for macOS, Windows, and Linux.
+                    </p>
+                    <div className="animate-fade-in-up-d3 mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
+                        <Button
+                            asChild
+                            size="lg"
+                            className="brand-gradient gap-2 border-0 px-8 text-base text-white shadow-lg hover:opacity-90"
+                        >
+                            <Link href={register()}>
+                                <i className="bx bx-download" />
+                                Download for Free
+                            </Link>
+                        </Button>
+                        <Button
+                            asChild
+                            variant="outline"
+                            size="lg"
+                            className="gap-2 px-8 text-base"
+                        >
+                            <a href="#features" onClick={handleAnchorClick}>
+                                <i className="bx bx-play-circle" />
+                                See Features
+                            </a>
+                        </Button>
+                    </div>
+
+                    {/* Platform availability */}
+                    <div className="animate-fade-in-up-d4 mt-14">
+                        <p className="mb-4 text-xs font-medium tracking-widest text-muted-foreground/70 uppercase">
+                            Available on
+                        </p>
+                        <div className="flex flex-wrap items-center justify-center gap-6">
+                            {platforms.map((p) => (
+                                <div
+                                    key={p.label}
+                                    className={`flex flex-col items-center gap-1.5 transition-all duration-300 ${
+                                        p.available
+                                            ? 'text-foreground'
+                                            : 'text-muted-foreground/30'
+                                    }`}
+                                >
+                                    <i className={`${p.icon} text-2xl`} />
+                                    <span className="text-xs font-medium">
+                                        {p.label}
+                                        {!p.available && (
+                                            <span className="ml-1 text-[10px] opacity-60">
+                                                soon
+                                            </span>
+                                        )}
+                                    </span>
+                                </div>
+                            ))}
+                        </div>
+                    </div>
                 </div>
 
-                {/* Platform icons */}
-                <div className="animate-fade-in-up-d4 mt-16">
-                    <p className="mb-4 text-xs font-medium tracking-widest text-muted-foreground uppercase">
-                        Available on Desktop
-                    </p>
-                    <div className="flex flex-wrap items-center justify-center gap-6">
-                        {platforms.map((p) => (
-                            <div
-                                key={p.label}
-                                className={`flex flex-col items-center gap-1.5 transition-colors ${p.available ? 'text-foreground' : 'text-muted-foreground/40'}`}
-                            >
-                                <i className={`${p.icon} text-2xl`} />
-                                <span className="text-xs">
-                                    {p.label}
-                                    {!p.available && (
-                                        <span className="ml-1 text-[10px] opacity-60">
-                                            soon
-                                        </span>
-                                    )}
+                {/* Terminal mockup */}
+                <div className="animate-fade-in-up-d5 mx-auto mt-20 max-w-2xl">
+                    <div className="terminal-window brand-glow">
+                        <div className="terminal-header">
+                            <div className="terminal-dot bg-[#ff5f57]" />
+                            <div className="terminal-dot bg-[#febc2e]" />
+                            <div className="terminal-dot bg-[#28c840]" />
+                            <span className="ml-3 text-xs text-[oklch(0.55_0_0)]">
+                                orchestra-mcp
+                            </span>
+                        </div>
+                        <div className="terminal-body">
+                            <div>
+                                <span className="t-dim">$</span>{' '}
+                                <span className="t-cyan">npx</span>{' '}
+                                <span className="t-white">orchestra-mcp init</span>
+                            </div>
+                            <div className="mt-1">
+                                <span className="t-green">
+                                    {'>'} Workspace initialized
                                 </span>
                             </div>
-                        ))}
+                            <div className="mt-3">
+                                <span className="t-dim">$</span>{' '}
+                                <span className="t-cyan">orchestra</span>{' '}
+                                <span className="t-white">start</span>
+                            </div>
+                            <div className="mt-1">
+                                <span className="t-purple">
+                                    {'>'} 57 tools loaded
+                                </span>
+                            </div>
+                            <div>
+                                <span className="t-purple">
+                                    {'>'} 16 agents ready
+                                </span>
+                            </div>
+                            <div>
+                                <span className="t-green">
+                                    {'>'} Rust engine connected
+                                </span>
+                            </div>
+                            <div className="mt-3">
+                                <span className="t-dim">$</span>{' '}
+                                <span className="typing-cursor" />
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -351,14 +435,18 @@ function HeroSection() {
 
 function StatsSection() {
     return (
-        <section className="border-y bg-muted/30 py-12">
-            <div className="stagger-children mx-auto grid max-w-5xl grid-cols-2 gap-8 px-4 sm:grid-cols-4 sm:px-6 lg:px-8">
+        <section className="relative border-y border-border/50 py-16">
+            <div className="absolute inset-0 -z-10 bg-muted/20" />
+            <div className="stagger-children mx-auto grid max-w-5xl grid-cols-2 gap-6 px-4 sm:grid-cols-4 sm:px-6 lg:px-8">
                 {stats.map((s) => (
-                    <div key={s.label} className="text-center">
-                        <div className="brand-gradient-text text-4xl font-extrabold tracking-tight">
+                    <div
+                        key={s.label}
+                        className="glass-card group rounded-2xl border border-border/50 p-6 text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+                    >
+                        <div className="brand-gradient-text text-5xl font-extrabold tracking-tighter">
                             {s.value}
                         </div>
-                        <div className="mt-1 text-sm font-medium text-muted-foreground">
+                        <div className="mt-2 text-sm font-medium text-muted-foreground">
                             {s.label}
                         </div>
                     </div>
@@ -370,30 +458,39 @@ function StatsSection() {
 
 function FeaturesSection() {
     return (
-        <section id="features" className="scroll-mt-20 py-24 sm:py-32">
+        <section id="features" className="scroll-mt-20 py-28 sm:py-36">
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                 <div className="animate-on-scroll mx-auto max-w-3xl text-center">
-                    <Badge variant="outline" className="mb-4">
-                        <i className="bx bx-star mr-1" />
+                    <Badge
+                        variant="outline"
+                        className="mb-4 border-primary/20"
+                    >
+                        <i className="bx bx-star mr-1 text-primary" />
                         Features
                     </Badge>
-                    <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-                        Everything you need to ship faster
+                    <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl lg:text-5xl">
+                        Everything you need to{' '}
+                        <span className="brand-gradient-text">ship faster</span>
                     </h2>
-                    <p className="mt-4 text-lg text-muted-foreground">
+                    <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
                         From AI code generation to project management,
                         Orchestra MCP combines the best tools into one
                         unified experience.
                     </p>
                 </div>
-                <div className="stagger-children mx-auto mt-16 grid max-w-6xl gap-5 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="stagger-children mx-auto mt-20 grid max-w-6xl gap-5 sm:grid-cols-2 lg:grid-cols-3">
                     {features.map((f) => (
                         <Card
                             key={f.title}
-                            className="group transition-all duration-300 hover:-translate-y-1 hover:shadow-lg"
+                            className="group glass-card relative overflow-hidden border-border/50 transition-all duration-300 hover:-translate-y-1.5 hover:border-transparent hover:shadow-xl"
                         >
+                            {/* Gradient border on hover */}
+                            <div className="absolute inset-0 -z-10 rounded-[inherit] bg-gradient-to-br from-[#00e5ff]/0 via-transparent to-[#a900ff]/0 opacity-0 transition-opacity duration-300 group-hover:opacity-100" />
+                            <div className="absolute inset-px -z-10 rounded-[calc(inherit-1px)] bg-card transition-colors group-hover:bg-card/95" />
+                            <div className="absolute inset-0 rounded-[inherit] opacity-0 transition-opacity duration-300 group-hover:opacity-100" style={{ background: 'linear-gradient(135deg, #00e5ff, #a900ff)', padding: '1px', WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)', WebkitMaskComposite: 'xor', maskComposite: 'exclude' }} />
+
                             <CardHeader className="pb-3">
-                                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-xl bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground">
+                                <div className="brand-gradient mb-4 flex h-12 w-12 items-center justify-center rounded-xl text-white shadow-md transition-transform duration-300 group-hover:scale-110">
                                     <i className={`${f.icon} text-2xl`} />
                                 </div>
                                 <CardTitle className="text-base leading-snug">
@@ -458,41 +555,57 @@ function AgentsSection() {
     ];
 
     return (
-        <section className="border-t bg-muted/40 py-24 sm:py-32">
+        <section
+            id="agents"
+            className="relative scroll-mt-20 overflow-hidden py-28 sm:py-36"
+        >
+            <div className="absolute inset-0 -z-10 bg-muted/30" />
+            {/* Subtle gradient accent */}
+            <div className="absolute right-0 top-0 -z-10 h-96 w-96 rounded-full bg-[radial-gradient(circle,oklch(0.55_0.27_295/0.04),transparent)]" />
+
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                 <div className="animate-on-scroll mx-auto max-w-3xl text-center">
-                    <Badge variant="outline" className="mb-4">
-                        <i className="bx bx-bot mr-1" />
+                    <Badge
+                        variant="outline"
+                        className="mb-4 border-primary/20"
+                    >
+                        <i className="bx bx-bot mr-1 text-primary" />
                         AI Agents
                     </Badge>
-                    <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-                        16 specialized agents at your command
+                    <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl lg:text-5xl">
+                        <span className="brand-gradient-text">16 agents</span>{' '}
+                        at your command
                     </h2>
-                    <p className="mt-4 text-lg text-muted-foreground">
-                        Each agent is an expert in its domain — from backend
-                        architecture to mobile development. They work
-                        autonomously, then report back.
+                    <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
+                        Each agent is an expert in its domain. They work
+                        autonomously on complex tasks, then report back with
+                        results.
                     </p>
                 </div>
-                <div className="stagger-children mx-auto mt-16 grid max-w-4xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="stagger-children mx-auto mt-20 grid max-w-5xl gap-5 sm:grid-cols-2 lg:grid-cols-4">
                     {agents.map((a) => (
                         <div
                             key={a.name}
-                            className="flex flex-col items-center rounded-xl border bg-card p-5 text-center transition-all duration-300 hover:-translate-y-1 hover:shadow-md"
+                            className="group flex flex-col items-center rounded-2xl border border-border/50 bg-card/80 p-6 text-center backdrop-blur-sm transition-all duration-300 hover:-translate-y-1.5 hover:shadow-xl"
                         >
-                            <div className="mb-3 flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                                <i className={`${a.icon} text-xl`} />
+                            {/* Gradient ring around icon */}
+                            <div className="gradient-ring mb-4 rounded-2xl p-[2px]">
+                                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-card transition-colors group-hover:bg-muted/50">
+                                    <i
+                                        className={`${a.icon} text-2xl brand-gradient-text`}
+                                    />
+                                </div>
                             </div>
                             <div className="text-sm font-semibold text-foreground">
                                 {a.name}
                             </div>
-                            <div className="mt-1 text-xs text-muted-foreground">
+                            <div className="mt-1.5 text-xs leading-relaxed text-muted-foreground">
                                 {a.desc}
                             </div>
                         </div>
                     ))}
                 </div>
-                <p className="animate-on-scroll mt-8 text-center text-sm text-muted-foreground">
+                <p className="animate-on-scroll mt-10 text-center text-sm text-muted-foreground">
                     Plus 8 more: Scrum Master, Widget Engineer, Platform
                     Engineer, Extension Architect, QA Go, QA Rust, QA Node, QA
                     Playwright
@@ -504,40 +617,54 @@ function AgentsSection() {
 
 function TechSection() {
     return (
-        <section id="tech" className="scroll-mt-20 border-t py-24 sm:py-32">
+        <section id="tech" className="scroll-mt-20 border-t border-border/50 py-28 sm:py-36">
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                 <div className="animate-on-scroll mx-auto max-w-3xl text-center">
-                    <Badge variant="outline" className="mb-4">
-                        <i className="bx bx-chip mr-1" />
+                    <Badge
+                        variant="outline"
+                        className="mb-4 border-primary/20"
+                    >
+                        <i className="bx bx-chip mr-1 text-primary" />
                         Tech Stack
                     </Badge>
-                    <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-                        Built on battle-tested technology
+                    <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl lg:text-5xl">
+                        Built on{' '}
+                        <span className="brand-gradient-text">
+                            battle-tested
+                        </span>{' '}
+                        technology
                     </h2>
-                    <p className="mt-4 text-lg text-muted-foreground">
-                        Go for the API layer, Rust for the engine, React for
+                    <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
+                        Go for the API layer. Rust for the engine. React for
                         every frontend. No compromises.
                     </p>
                 </div>
-                <div className="stagger-children mx-auto mt-16 grid max-w-4xl gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                    {techStack.map((t) => (
-                        <div
-                            key={t.label}
-                            className="flex items-center gap-3 rounded-xl border bg-card p-4 transition-all duration-300 hover:-translate-y-1 hover:shadow-md"
-                        >
-                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                                <i className={`${t.icon} text-xl`} />
-                            </div>
-                            <div>
-                                <div className="text-sm font-semibold text-foreground">
-                                    {t.label}
+
+                {/* Horizontal scrolling pills */}
+                <div className="animate-on-scroll mx-auto mt-16 max-w-4xl">
+                    <div className="tech-scroll justify-center px-4 sm:flex-wrap">
+                        {techStack.map((t) => (
+                            <div
+                                key={t.label}
+                                className="group flex items-center gap-3 rounded-full border border-border/50 bg-card/80 px-5 py-3 backdrop-blur-sm transition-all duration-300 hover:border-transparent hover:shadow-lg"
+                                style={{ minWidth: 'fit-content' }}
+                            >
+                                {/* Hover gradient border */}
+                                <div className="absolute inset-0 rounded-full opacity-0 transition-opacity duration-300 group-hover:opacity-100" style={{ background: 'linear-gradient(135deg, #00e5ff, #a900ff)', padding: '1px', WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)', WebkitMaskComposite: 'xor', maskComposite: 'exclude' }} />
+                                <div className="brand-gradient flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-white shadow-sm">
+                                    <i className={`${t.icon} text-lg`} />
                                 </div>
-                                <div className="text-xs text-muted-foreground">
-                                    {t.desc}
+                                <div>
+                                    <div className="text-sm font-semibold text-foreground">
+                                        {t.label}
+                                    </div>
+                                    <div className="text-xs text-muted-foreground">
+                                        {t.desc}
+                                    </div>
                                 </div>
                             </div>
-                        </div>
-                    ))}
+                        ))}
+                    </div>
                 </div>
             </div>
         </section>
@@ -549,68 +676,78 @@ function WorkflowSection() {
         {
             icon: 'bx bx-list-plus',
             label: 'Backlog',
-            color: 'bg-muted text-muted-foreground',
         },
         {
             icon: 'bx bx-check-circle',
             label: 'Todo',
-            color: 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
         },
         {
             icon: 'bx bx-loader-alt',
             label: 'In Progress',
-            color: 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400',
         },
         {
             icon: 'bx bx-test-tube',
             label: 'Testing',
-            color: 'bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400',
         },
         {
             icon: 'bx bx-file',
             label: 'Docs',
-            color: 'bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400',
         },
         {
             icon: 'bx bx-search-alt',
             label: 'Review',
-            color: 'bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400',
         },
         {
             icon: 'bx bx-check-double',
             label: 'Done',
-            color: 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400',
         },
     ];
 
     return (
-        <section className="border-t bg-muted/40 py-24 sm:py-32">
+        <section className="relative overflow-hidden py-28 sm:py-36">
+            <div className="absolute inset-0 -z-10 bg-muted/30" />
+
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                 <div className="animate-on-scroll mx-auto max-w-3xl text-center">
-                    <Badge variant="outline" className="mb-4">
-                        <i className="bx bx-git-merge mr-1" />
+                    <Badge
+                        variant="outline"
+                        className="mb-4 border-primary/20"
+                    >
+                        <i className="bx bx-git-merge mr-1 text-primary" />
                         Workflow
                     </Badge>
-                    <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-                        13-state lifecycle with gated transitions
+                    <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl lg:text-5xl">
+                        Quality{' '}
+                        <span className="brand-gradient-text">
+                            built into
+                        </span>{' '}
+                        the process
                     </h2>
-                    <p className="mt-4 text-lg text-muted-foreground">
+                    <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
                         Every task flows through testing, documentation, and
-                        review gates. Quality is built into the process, not
-                        bolted on.
+                        review gates. 13 states. No shortcuts.
                     </p>
                 </div>
-                <div className="stagger-children mx-auto mt-12 flex max-w-4xl flex-wrap items-center justify-center gap-3">
+                <div className="stagger-children mx-auto mt-16 flex max-w-5xl flex-wrap items-center justify-center gap-3">
                     {steps.map((s, i) => (
                         <div key={s.label} className="flex items-center gap-3">
-                            <div
-                                className={`flex items-center gap-2 rounded-full px-4 py-2 text-sm font-medium ${s.color}`}
-                            >
-                                <i className={s.icon} />
+                            <div className="group relative flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-foreground transition-all duration-300 hover:-translate-y-0.5 hover:shadow-md">
+                                {/* Gradient border outline */}
+                                <div
+                                    className="absolute inset-0 rounded-full"
+                                    style={{
+                                        background: 'linear-gradient(135deg, #00e5ff, #a900ff)',
+                                        padding: '1.5px',
+                                        WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+                                        WebkitMaskComposite: 'xor',
+                                        maskComposite: 'exclude',
+                                    }}
+                                />
+                                <i className={`${s.icon} brand-gradient-text`} />
                                 {s.label}
                             </div>
                             {i < steps.length - 1 && (
-                                <i className="bx bx-right-arrow-alt text-lg text-muted-foreground" />
+                                <i className="bx bx-right-arrow-alt brand-gradient-text text-xl" />
                             )}
                         </div>
                     ))}
@@ -622,78 +759,123 @@ function WorkflowSection() {
 
 function PricingSection() {
     return (
-        <section id="pricing" className="scroll-mt-20 border-t py-24 sm:py-32">
+        <section
+            id="pricing"
+            className="scroll-mt-20 border-t border-border/50 py-28 sm:py-36"
+        >
             <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
                 <div className="animate-on-scroll mx-auto max-w-3xl text-center">
-                    <Badge variant="outline" className="mb-4">
-                        <i className="bx bx-purchase-tag mr-1" />
-                        Pricing
+                    <Badge
+                        variant="outline"
+                        className="mb-4 border-primary/20"
+                    >
+                        <i className="bx bxl-github mr-1 text-primary" />
+                        GitHub Sponsors
                     </Badge>
-                    <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl">
-                        Simple, transparent pricing
+                    <h2 className="text-3xl font-bold tracking-tight text-foreground sm:text-4xl lg:text-5xl">
+                        Powered by{' '}
+                        <span className="brand-gradient-text">sponsors</span>
                     </h2>
-                    <p className="mt-4 text-lg text-muted-foreground">
-                        Start free. Upgrade when you need cloud AI and unlimited
-                        sync.
+                    <p className="mt-5 text-lg leading-relaxed text-muted-foreground">
+                        Orchestra MCP is free to use. Sponsor us on GitHub to
+                        unlock cloud AI, unlimited sync, and premium features.
                     </p>
                 </div>
-                <div className="stagger-children mx-auto mt-16 grid max-w-5xl gap-6 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="stagger-children mx-auto mt-20 grid max-w-5xl gap-6 sm:grid-cols-2 lg:grid-cols-3">
                     {plans.map((plan) => (
                         <Card
                             key={plan.name}
-                            className={`relative flex flex-col transition-all duration-300 hover:-translate-y-1 ${plan.highlighted ? 'border-primary shadow-lg ring-1 ring-primary/20' : ''}`}
+                            className={`glass-card relative flex flex-col border-border/50 transition-all duration-300 hover:-translate-y-1.5 ${
+                                plan.highlighted
+                                    ? 'animate-pulse-glow mt-4 border-transparent shadow-xl'
+                                    : 'hover:shadow-xl'
+                            }`}
                         >
+                            {/* Gradient border for highlighted plan */}
                             {plan.highlighted && (
-                                <div className="absolute -top-3 left-1/2 -translate-x-1/2">
-                                    <Badge className="px-3">
-                                        Most Popular
+                                <div
+                                    className="absolute inset-0 rounded-[inherit]"
+                                    style={{
+                                        background: 'linear-gradient(135deg, #00e5ff, #a900ff)',
+                                        padding: '1.5px',
+                                        WebkitMask: 'linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0)',
+                                        WebkitMaskComposite: 'xor',
+                                        maskComposite: 'exclude',
+                                    }}
+                                />
+                            )}
+                            {plan.highlighted && (
+                                <div className="absolute -top-3.5 left-1/2 z-10 -translate-x-1/2">
+                                    <Badge className="brand-gradient border-0 px-4 text-white shadow-md">
+                                        Recommended
                                     </Badge>
                                 </div>
                             )}
-                            <CardHeader>
+                            <CardHeader className="relative">
                                 <CardTitle className="text-lg">
                                     {plan.name}
                                 </CardTitle>
-                                <div className="mt-3 flex items-baseline gap-1">
-                                    <span className="text-4xl font-extrabold tracking-tight text-foreground">
+                                <div className="mt-4 flex items-baseline gap-1">
+                                    <span className={`text-5xl font-extrabold tracking-tight ${plan.highlighted ? 'brand-gradient-text' : 'text-foreground'}`}>
                                         {plan.price}
                                     </span>
                                     <span className="text-sm text-muted-foreground">
                                         {plan.period}
                                     </span>
                                 </div>
-                                <p className="mt-2 text-sm text-muted-foreground">
+                                <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
                                     {plan.description}
                                 </p>
                             </CardHeader>
-                            <CardContent className="flex flex-1 flex-col">
-                                <Separator className="mb-5" />
-                                <ul className="flex-1 space-y-3 text-sm">
+                            <CardContent className="relative flex flex-1 flex-col">
+                                <Separator className="mb-6" />
+                                <ul className="flex-1 space-y-3.5 text-sm">
                                     {plan.features.map((feature) => (
                                         <li
                                             key={feature}
-                                            className="flex items-start gap-2.5 text-muted-foreground"
+                                            className="flex items-start gap-3 text-muted-foreground"
                                         >
                                             <i className="bx bx-check mt-0.5 text-lg text-primary" />
                                             {feature}
                                         </li>
                                     ))}
                                 </ul>
-                                <Button
-                                    asChild
-                                    className="mt-8 w-full"
-                                    variant={
-                                        plan.highlighted
-                                            ? 'default'
-                                            : 'outline'
-                                    }
-                                >
-                                    <Link href={register()}>{plan.cta}</Link>
-                                </Button>
+                                {plan.ctaHref === 'github' ? (
+                                    <Button
+                                        asChild
+                                        className={`mt-8 w-full gap-2 ${
+                                            plan.highlighted
+                                                ? 'brand-gradient border-0 text-white shadow-md hover:opacity-90'
+                                                : ''
+                                        }`}
+                                        variant={plan.highlighted ? 'default' : 'outline'}
+                                    >
+                                        <a href={GITHUB_SPONSORS_URL} target="_blank" rel="noopener noreferrer">
+                                            <i className="bx bxl-github" />
+                                            {plan.cta}
+                                        </a>
+                                    </Button>
+                                ) : (
+                                    <Button
+                                        asChild
+                                        className="mt-8 w-full"
+                                        variant="outline"
+                                    >
+                                        <Link href={register()}>{plan.cta}</Link>
+                                    </Button>
+                                )}
                             </CardContent>
                         </Card>
                     ))}
                 </div>
+                <p className="animate-on-scroll mt-10 text-center text-sm text-muted-foreground">
+                    After sponsoring, your account is activated manually by an admin.
+                    Already a sponsor?{' '}
+                    <Link href={login()} className="text-foreground underline underline-offset-4 hover:text-primary">
+                        Log in
+                    </Link>{' '}
+                    to check your status.
+                </p>
             </div>
         </section>
     );
@@ -701,21 +883,21 @@ function PricingSection() {
 
 function CTASection() {
     return (
-        <section className="brand-gradient border-t py-20">
+        <section className="cta-gradient-bg shimmer relative py-24">
             <div className="animate-on-scroll-scale mx-auto max-w-4xl px-4 text-center sm:px-6 lg:px-8">
-                <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl">
+                <h2 className="text-3xl font-bold tracking-tight text-white sm:text-4xl lg:text-5xl">
                     Ready to orchestrate your workflow?
                 </h2>
-                <p className="mx-auto mt-4 max-w-2xl text-lg text-white/80">
+                <p className="mx-auto mt-6 max-w-2xl text-lg leading-relaxed text-white/80">
                     Join developers who are shipping faster with AI agents,
                     real-time sync, and a 13-state workflow engine.
                 </p>
-                <div className="mt-8 flex flex-col items-center justify-center gap-4 sm:flex-row">
+                <div className="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
                     <Button
                         asChild
                         size="lg"
                         variant="secondary"
-                        className="gap-2 px-8 text-base"
+                        className="gap-2 px-8 text-base font-semibold shadow-lg"
                     >
                         <Link href={register()}>
                             <i className="bx bx-rocket" />
@@ -726,7 +908,7 @@ function CTASection() {
                         asChild
                         size="lg"
                         variant="outline"
-                        className="gap-2 border-white/30 px-8 text-base text-white hover:bg-white/10 hover:text-white"
+                        className="gap-2 border-white/30 bg-white/5 px-8 text-base text-white backdrop-blur-sm hover:bg-white/15 hover:text-white"
                     >
                         <a href="https://github.com/orchestra-mcp">
                             <i className="bx bxl-github" />
@@ -741,29 +923,52 @@ function CTASection() {
 
 function Footer() {
     return (
-        <footer className="border-t py-12">
-            <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-                <div className="grid gap-8 sm:grid-cols-2 lg:grid-cols-4">
-                    <div>
-                        <div className="flex items-center gap-2 text-lg font-bold text-foreground">
+        <footer className="relative border-t border-border/50 pt-0">
+            {/* Brand gradient top line */}
+            <div className="brand-gradient h-px w-full" />
+
+            <div className="mx-auto max-w-7xl px-4 pb-12 pt-16 sm:px-6 lg:px-8">
+                <div className="grid gap-12 sm:grid-cols-2 lg:grid-cols-4">
+                    <div className="lg:col-span-1">
+                        <div className="flex items-center gap-2.5 text-lg font-bold text-foreground">
                             <AppLogoIcon className="size-6" />
                             Orchestra MCP
                         </div>
-                        <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                        <p className="mt-4 max-w-xs text-sm leading-relaxed text-muted-foreground">
                             The AI-Agentic IDE for modern development. Build,
                             manage, and ship across every platform.
                         </p>
+                        <div className="mt-6 flex items-center gap-3">
+                            <a
+                                href="https://github.com/orchestra-mcp"
+                                className="flex h-9 w-9 items-center justify-center rounded-lg border border-border/50 text-muted-foreground transition-all hover:border-primary/30 hover:text-foreground"
+                            >
+                                <i className="bx bxl-github text-lg" />
+                            </a>
+                            <a
+                                href="https://discord.gg/orchestra-mcp"
+                                className="flex h-9 w-9 items-center justify-center rounded-lg border border-border/50 text-muted-foreground transition-all hover:border-primary/30 hover:text-foreground"
+                            >
+                                <i className="bx bxl-discord-alt text-lg" />
+                            </a>
+                            <a
+                                href="https://twitter.com/orchestra_mcp"
+                                className="flex h-9 w-9 items-center justify-center rounded-lg border border-border/50 text-muted-foreground transition-all hover:border-primary/30 hover:text-foreground"
+                            >
+                                <i className="bx bxl-twitter text-lg" />
+                            </a>
+                        </div>
                     </div>
                     <div>
-                        <h3 className="text-sm font-semibold text-foreground">
+                        <h3 className="text-sm font-semibold tracking-wide text-foreground">
                             Product
                         </h3>
-                        <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+                        <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
                             <li>
                                 <a
                                     href="#features"
                                     onClick={handleAnchorClick}
-                                    className="hover:text-foreground"
+                                    className="transition-colors hover:text-foreground"
                                 >
                                     Features
                                 </a>
@@ -772,7 +977,7 @@ function Footer() {
                                 <a
                                     href="#pricing"
                                     onClick={handleAnchorClick}
-                                    className="hover:text-foreground"
+                                    className="transition-colors hover:text-foreground"
                                 >
                                     Pricing
                                 </a>
@@ -781,7 +986,7 @@ function Footer() {
                                 <a
                                     href="#tech"
                                     onClick={handleAnchorClick}
-                                    className="hover:text-foreground"
+                                    className="transition-colors hover:text-foreground"
                                 >
                                     Tech Stack
                                 </a>
@@ -789,79 +994,77 @@ function Footer() {
                         </ul>
                     </div>
                     <div>
-                        <h3 className="text-sm font-semibold text-foreground">
+                        <h3 className="text-sm font-semibold tracking-wide text-foreground">
                             Developers
                         </h3>
-                        <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+                        <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
                             <li>
                                 <a
                                     href="https://github.com/orchestra-mcp"
-                                    className="hover:text-foreground"
+                                    className="transition-colors hover:text-foreground"
                                 >
                                     GitHub
                                 </a>
                             </li>
                             <li>
-                                <a href="#" className="hover:text-foreground">
+                                <a
+                                    href="#"
+                                    className="transition-colors hover:text-foreground"
+                                >
                                     Documentation
                                 </a>
                             </li>
                             <li>
-                                <a href="#" className="hover:text-foreground">
+                                <a
+                                    href="#"
+                                    className="transition-colors hover:text-foreground"
+                                >
                                     Extensions
                                 </a>
                             </li>
                         </ul>
                     </div>
                     <div>
-                        <h3 className="text-sm font-semibold text-foreground">
+                        <h3 className="text-sm font-semibold tracking-wide text-foreground">
                             Company
                         </h3>
-                        <ul className="mt-3 space-y-2 text-sm text-muted-foreground">
+                        <ul className="mt-4 space-y-3 text-sm text-muted-foreground">
                             <li>
-                                <a href="#" className="hover:text-foreground">
+                                <a
+                                    href="#"
+                                    className="transition-colors hover:text-foreground"
+                                >
                                     About
                                 </a>
                             </li>
                             <li>
-                                <a href="#" className="hover:text-foreground">
+                                <a
+                                    href="#"
+                                    className="transition-colors hover:text-foreground"
+                                >
                                     Privacy
                                 </a>
                             </li>
                             <li>
-                                <a href="#" className="hover:text-foreground">
+                                <a
+                                    href="#"
+                                    className="transition-colors hover:text-foreground"
+                                >
                                     Terms
                                 </a>
                             </li>
                         </ul>
                     </div>
                 </div>
-                <Separator className="my-8" />
+                <Separator className="my-10" />
                 <div className="flex flex-col items-center justify-between gap-4 text-sm text-muted-foreground sm:flex-row">
                     <p>
                         &copy; {new Date().getFullYear()} Orchestra MCP. All
                         rights reserved.
                     </p>
-                    <div className="flex items-center gap-4">
-                        <a
-                            href="https://github.com/orchestra-mcp"
-                            className="transition-colors hover:text-foreground"
-                        >
-                            <i className="bx bxl-github text-xl" />
-                        </a>
-                        <a
-                            href="https://discord.gg/orchestra-mcp"
-                            className="transition-colors hover:text-foreground"
-                        >
-                            <i className="bx bxl-discord-alt text-xl" />
-                        </a>
-                        <a
-                            href="https://twitter.com/orchestra_mcp"
-                            className="transition-colors hover:text-foreground"
-                        >
-                            <i className="bx bxl-twitter text-xl" />
-                        </a>
-                    </div>
+                    <p className="text-xs text-muted-foreground/60">
+                        Built with Go, Rust, and React
+                    </p>
                 </div>
             </div>
         </footer>

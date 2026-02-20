@@ -58,6 +58,11 @@ class Subscription extends Model
         return $this->status === 'past_due';
     }
 
+    public function isSponsor(): bool
+    {
+        return in_array($this->plan, ['sponsor', 'team_sponsor']) && $this->isActive();
+    }
+
     /** @param Builder<Subscription> $query */
     public function scopeExpiringSoon(Builder $query): void
     {

@@ -73,4 +73,17 @@ class UserFactory extends Factory
             'password_set' => false,
         ]);
     }
+
+    public function withSubscription(string $plan = 'sponsor'): static
+    {
+        return $this->afterCreating(function (\App\Models\User $user) use ($plan) {
+            $user->subscription()->create([
+                'plan' => $plan,
+                'status' => 'active',
+                'start_date' => now(),
+                'end_date' => now()->addYear(),
+                'amount_cents' => $plan === 'team_sponsor' ? 2500 : 500,
+            ]);
+        });
+    }
 }

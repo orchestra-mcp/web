@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Middleware\EnsureActiveSubscription;
 use App\Http\Middleware\EnsurePasswordSet;
 use App\Http\Middleware\EnsureUserActive;
 use App\Http\Middleware\EnsureUserIsAdmin;
@@ -30,6 +31,7 @@ return Application::configure(basePath: dirname(__DIR__))
             'password.set' => EnsurePasswordSet::class,
             'user.active' => EnsureUserActive::class,
             'admin' => EnsureUserIsAdmin::class,
+            'subscribed' => EnsureActiveSubscription::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

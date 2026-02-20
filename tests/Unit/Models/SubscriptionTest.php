@@ -10,7 +10,7 @@ test('subscription can check if active', function () {
     $user = User::factory()->create();
     $sub = Subscription::create([
         'user_id' => $user->id,
-        'plan' => 'pro',
+        'plan' => 'sponsor',
         'status' => 'active',
         'start_date' => now(),
         'end_date' => now()->addMonth(),
@@ -25,7 +25,7 @@ test('subscription expiring soon scope works', function () {
     $user = User::factory()->create();
     Subscription::create([
         'user_id' => $user->id,
-        'plan' => 'pro',
+        'plan' => 'sponsor',
         'status' => 'active',
         'start_date' => now()->subMonth(),
         'end_date' => now()->addDays(3),

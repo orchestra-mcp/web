@@ -1,7 +1,7 @@
 export type Subscription = {
     id: number;
     user_id: number;
-    plan: 'free' | 'pro' | 'team';
+    plan: 'free' | 'sponsor' | 'team_sponsor';
     status: 'active' | 'expired' | 'cancelled' | 'past_due';
     start_date: string | null;
     end_date: string | null;
@@ -58,6 +58,7 @@ export type Auth = {
     user: User;
     notifications?: Notification[];
     isAdmin?: boolean;
+    hasActiveSubscription?: boolean;
 };
 
 export type PageData = {

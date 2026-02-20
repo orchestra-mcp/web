@@ -11,7 +11,7 @@ return new class extends Migration
         Schema::create('subscriptions', function (Blueprint $table) {
             $table->id();
             $table->foreignId('user_id')->constrained()->cascadeOnDelete();
-            $table->enum('plan', ['free', 'pro', 'team'])->default('free');
+            $table->enum('plan', ['free', 'sponsor', 'team_sponsor'])->default('free');
             $table->enum('status', ['active', 'expired', 'cancelled', 'past_due'])->default('active');
             $table->date('start_date')->nullable();
             $table->date('end_date')->nullable();

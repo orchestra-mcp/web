@@ -6,8 +6,10 @@ use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Models\UserMeta;
 use App\Notifications\WelcomeNotification;
+use GuzzleHttp\Exception\ClientException;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 use Laravel\Socialite\Facades\Socialite;
 
 class SocialAuthController extends Controller
@@ -26,7 +28,43 @@ class SocialAuthController extends Controller
     {
         $this->validateProvider($provider);
 
-        $socialUser = Socialite::driver($provider)->user();
+        try {
+            $socialUser = Socialite::driver($provider)->user();
+        } catch (ClientException $e) {
+            $status = $e->getResponse()->getStatusCode();
+            $providerName = ucfirst($provider);
+
+            if ($status === 403) {
+                Log::warning("Social auth rate limited by {$provider}", [
+                    'status' => $status,
+                    'provider' => $provider,
+                ]);
+
+                return redirect()->route('login')->withErrors([
+                    'email' => "{$providerName} API rate limit exceeded. Please wait a few minutes and try again.",
+                ]);
+            }
+
+            Log::error("Social auth failed for {$provider}", [
+                'status' => $status,
+                'provider' => $provider,
+                'message' => $e->getMessage(),
+            ]);
+
+            return redirect()->route('login')->withErrors([
+                'email' => "Unable to authenticate with {$providerName}. Please try again later.",
+            ]);
+        } catch (\Exception $e) {
+            Log::error("Social auth unexpected error for {$provider}", [
+                'provider' => $provider,
+                'message' => $e->getMessage(),
+            ]);
+
+            return redirect()->route('login')->withErrors([
+                'email' => 'Authentication failed. Please try again or use a different login method.',
+            ]);
+        }
+
         $metaKey = $provider.'_id';
 
         // Find by provider ID in user_metas

@@ -36,7 +36,7 @@ class SubscriptionController extends Controller
     public function update(Request $request, Subscription $subscription): RedirectResponse
     {
         $validated = $request->validate([
-            'plan' => ['required', Rule::in(['free', 'pro', 'team'])],
+            'plan' => ['required', Rule::in(['free', 'sponsor', 'team_sponsor'])],
             'status' => ['required', Rule::in(['active', 'expired', 'cancelled', 'past_due'])],
             'start_date' => ['nullable', 'date'],
             'end_date' => ['nullable', 'date', 'after_or_equal:start_date'],

@@ -88,8 +88,8 @@ class GitHubSponsorsController extends Controller
     private function mapTierToPlan(int $amountCents): string
     {
         return match (true) {
-            $amountCents >= 2500 => 'team',
-            $amountCents >= 500 => 'pro',
+            $amountCents >= 2500 => 'team_sponsor',
+            $amountCents >= 500 => 'sponsor',
             default => 'free',
         };
     }

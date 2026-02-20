@@ -39,6 +39,12 @@ class AuthController extends Controller
             ]);
         }
 
+        if (! $user->hasActiveSubscription() && ! $user->isAdmin()) {
+            throw ValidationException::withMessages([
+                'email' => ['An active GitHub Sponsors subscription is required. Visit the web app to subscribe.'],
+            ]);
+        }
+
         $token = $user->createToken('ide-token', ['ide:access'])->plainTextToken;
 
         return response()->json([
