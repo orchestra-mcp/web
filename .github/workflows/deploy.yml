@@ -17,9 +17,11 @@ jobs:
 
     steps:
       - name: Notify Discord — Deploy started
-        if: ${{ secrets.DISCORD_WEBHOOK != '' }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+          [ -z "$DISCORD_WEBHOOK" ] && exit 0
+          curl -s -X POST "$DISCORD_WEBHOOK" \
             -H "Content-Type: application/json" \
             -d '{
               "embeds": [{
@@ -62,9 +64,12 @@ jobs:
             sudo systemctl status orchestra-web --no-pager -l | head -5
 
       - name: Notify Discord — Deploy succeeded
-        if: success() && ${{ secrets.DISCORD_WEBHOOK != '' }}
+        if: success()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+          [ -z "$DISCORD_WEBHOOK" ] && exit 0
+          curl -s -X POST "$DISCORD_WEBHOOK" \
             -H "Content-Type: application/json" \
             -d '{
               "embeds": [{
@@ -80,9 +85,12 @@ jobs:
             }'
 
       - name: Notify Discord — Deploy failed
-        if: failure() && ${{ secrets.DISCORD_WEBHOOK != '' }}
+        if: failure()
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
         run: |
-          curl -s -X POST "${{ secrets.DISCORD_WEBHOOK }}" \
+          [ -z "$DISCORD_WEBHOOK" ] && exit 0
+          curl -s -X POST "$DISCORD_WEBHOOK" \
             -H "Content-Type: application/json" \
             -d '{
               "embeds": [{
