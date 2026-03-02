@@ -56,6 +56,9 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 
 	api := app.Group("/api")
 
+	// Public settings (no auth — used by Next.js middleware for coming soon check)
+	api.Get("/settings/:key", adminSettingsHandler.GetPublicSetting)
+
 	// WebSocket route (before auth middleware — auth done via token query param).
 	api.Get("/ws", wsHandler.Handle)
 

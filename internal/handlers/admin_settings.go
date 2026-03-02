@@ -31,6 +31,12 @@ var validKeys = map[string]bool{
 	"integrations": true,
 	"smtp":         true,
 	"seo":          true,
+	"coming_soon":  true,
+}
+
+// publicKeys lists settings keys readable without authentication.
+var publicKeys = map[string]bool{
+	"coming_soon": true,
 }
 
 // defaultSettings returns default values for each key.
@@ -90,17 +96,39 @@ func defaultSettings(key string) interface{} {
 			"from_email": "noreply@orchestra.dev",
 		},
 		"seo": map[string]interface{}{
-			"title_template":    "%s | Orchestra",
-			"meta_description":  "Orchestra MCP — the AI-native developer workspace with 131 tools across 5 platforms.",
-			"og_image_url":      "/og-image.png",
-			"robots_txt":        "User-agent: *\nAllow: /",
-			"sitemap_url":       "/sitemap.xml",
+			"title_template":   "%s | Orchestra",
+			"meta_description": "Orchestra MCP — the AI-native developer workspace with 131 tools across 5 platforms.",
+			"og_image_url":     "/og-image.png",
+			"robots_txt":       "User-agent: *\nAllow: /",
+			"sitemap_url":      "/sitemap.xml",
+		},
+		"coming_soon": map[string]interface{}{
+			"enabled": false,
+			"message": "We're putting the finishing touches on something amazing. Stay tuned!",
+			"title":   "Coming Soon",
 		},
 	}
 	if v, ok := defaults[key]; ok {
 		return v
 	}
 	return map[string]interface{}{}
+}
+
+// GetPublicSetting handles GET /api/settings/:key — no auth required, only for public keys.
+func (h *AdminSettingsHandler) GetPublicSetting(c fiber.Ctx) error {
+	key := c.Params("key")
+	if !publicKeys[key] {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "not found"})
+	}
+
+	var setting models.SystemSetting
+	if err := h.db.Where("key = ?", key).First(&setting).Error; err != nil {
+		return c.JSON(fiber.Map{"key": key, "value": defaultSettings(key)})
+	}
+
+	var value interface{}
+	_ = json.Unmarshal(setting.Value, &value)
+	return c.JSON(fiber.Map{"key": key, "value": value})
 }
 
 // GetSetting handles GET /api/admin/settings/:key

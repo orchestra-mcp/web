@@ -72,6 +72,11 @@ func SeedDefaults(db *gorm.DB) {
 			"robots_txt":       "User-agent: *\nAllow: /",
 			"sitemap_url":      "/sitemap.xml",
 		},
+		"coming_soon": map[string]interface{}{
+			"enabled": false,
+			"message": "We're putting the finishing touches on something amazing. Stay tuned!",
+			"title":   "Coming Soon",
+		},
 	}
 
 	for key, val := range settings {
