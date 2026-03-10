@@ -14,6 +14,7 @@ type User struct {
 	Email                 string         `gorm:"uniqueIndex" json:"email"`
 	Password              string         `json:"-"`
 	Role                  string         `gorm:"default:user" json:"role"` // admin | team_owner | team_manager | user
+	AvatarURL             string         `json:"avatar_url"`
 	EmailVerifiedAt       *time.Time     `json:"email_verified_at"`
 	Status                string         `gorm:"default:active" json:"status"`
 	PasswordSet           bool           `gorm:"default:false" json:"password_set"`

@@ -11,9 +11,6 @@ import (
 // Connect opens a PostgreSQL connection using GORM.
 func Connect(cfg *config.Config) (*gorm.DB, error) {
 	logLevel := logger.Warn
-	if cfg.Env == "development" {
-		logLevel = logger.Info
-	}
 
 	db, err := gorm.Open(postgres.Open(cfg.DSN), &gorm.Config{
 		Logger: logger.Default.LogMode(logLevel),
@@ -52,5 +49,12 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.Issue{},
 		&models.Notification{},
 		&models.ContactMessage{},
+		&models.Tunnel{},
+		&models.Plan{},
+		&models.Person{},
+		&models.Request{},
+		&models.AssignmentRule{},
+		&models.SessionTurn{},
+		&models.Doc{},
 	)
 }

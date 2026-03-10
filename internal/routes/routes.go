@@ -32,6 +32,11 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 
 	app.Use(middleware.CORS())
 
+	// Serve uploaded files (avatars etc.)
+	app.Get("/uploads/*", func(c fiber.Ctx) error {
+		return c.SendFile("./uploads/" + c.Params("*"))
+	})
+
 	// Create and start WebSocket hub.
 	wsHub := hub.NewHub()
 	go wsHub.Run()
@@ -39,6 +44,7 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 	authSvc := services.NewAuthService(db, cfg)
 
 	authHandler := handlers.NewAuthHandler(db, cfg)
+	oauthHandler := handlers.NewOAuthHandler(db, cfg)
 	projectHandler := handlers.NewProjectHandler(db)
 	featureHandler := handlers.NewFeatureHandler(db)
 	epicHandler := handlers.NewEpicHandler(db)
@@ -50,17 +56,33 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 	teamHandler := handlers.NewTeamHandler(db)
 	adminHandler := handlers.NewAdminHandler(db)
 	settingsHandler := handlers.NewSettingsHandler(db)
-	adminCmsHandler := handlers.NewAdminCmsHandlerWithAuth(db, authSvc)
+	adminCmsHandler := handlers.NewAdminCmsHandlerWithAuth(db, authSvc, wsHub)
 	adminSettingsHandler := handlers.NewAdminSettingsHandler(db)
+	tunnelHub := handlers.NewTunnelHub()
+	tunnelHandler := handlers.NewTunnelHandler(db, tunnelHub)
+	tunnelProxyHandler := handlers.NewTunnelProxyHandler(db, cfg, tunnelHub)
+	tunnelReverseHandler := handlers.NewTunnelReverseHandler(db, tunnelHub)
+	searchHandler := handlers.NewSearchHandler(db)
+	docHandler := handlers.NewDocHandler(db)
 	wsHandler := handlers.NewWebSocketHandler(wsHub, db, cfg)
 
 	api := app.Group("/api")
 
-	// Public settings (no auth — used by Next.js middleware for coming soon check)
-	api.Get("/settings/:key", adminSettingsHandler.GetPublicSetting)
+	// Public settings (no auth — used by Next.js middleware for coming soon check).
+	// Uses /public/settings/ prefix to avoid collision with /settings/preferences etc.
+	api.Get("/public/settings/:key", adminSettingsHandler.GetPublicSetting)
 
-	// WebSocket route (before auth middleware — auth done via token query param).
+	// Public system docs (from repo docs/ folder, no auth required).
+	api.Get("/docs", docHandler.SystemList)
+	api.Get("/docs/:id", docHandler.SystemShow)
+
+	// WebSocket routes (before auth middleware — auth done via token query param).
 	api.Get("/ws", wsHandler.Handle)
+	api.Get("/tunnels/:id/ws", tunnelProxyHandler.Handle)
+	api.Get("/tunnels/reverse", tunnelReverseHandler.Handle)
+
+	// Tunnel claim (no JWT auth — nonce is the secret).
+	api.Post("/tunnels/claim", tunnelHandler.Claim)
 
 	// Public auth routes
 	auth := api.Group("/auth")
@@ -76,8 +98,19 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 	auth.Post("/device/request", authHandler.DeviceRequest)
 	auth.Post("/device/poll", authHandler.DevicePoll)
 
+	// OAuth routes (public — initiates redirect and handles callback)
+	auth.Get("/oauth/:provider", oauthHandler.Redirect)
+	auth.Get("/oauth/:provider/callback", oauthHandler.Callback)
+	// OAuth connect (reads JWT from cookie — browser redirects don't send Authorization header)
+	auth.Get("/oauth/:provider/connect", oauthHandler.Redirect)
+
 	// Authenticated routes
 	protected := api.Group("", middleware.Auth(db, cfg))
+
+	// System docs (auth required for editing)
+	protected.Put("/docs/:id", docHandler.SystemUpdate)
+	protected.Patch("/docs/:id/pin", docHandler.SystemPin)
+	protected.Delete("/docs/:id", docHandler.SystemDelete)
 
 	// Auth (protected)
 	protected.Get("/auth/me", authHandler.Me)
@@ -108,6 +141,10 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 	projects.Put("/:slug/features/:id", featureHandler.Update)
 	projects.Delete("/:slug/features/:id", featureHandler.Delete)
 
+	// Docs (wiki pages, synced from MCP docs plugin)
+	projects.Get("/:slug/docs", docHandler.List)
+	projects.Get("/:slug/docs/:id", docHandler.Show)
+
 	// Stories (nested under epic)
 	projects.Get("/:slug/epics/:epicId/stories", storyHandler.List)
 	projects.Post("/:slug/epics/:epicId/stories", storyHandler.Create)
@@ -130,6 +167,16 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 	notes.Put("/:id", noteHandler.Update)
 	notes.Delete("/:id", noteHandler.Delete)
 
+	// Tunnels
+	tunnels := protected.Group("/tunnels")
+	tunnels.Get("/", tunnelHandler.List)
+	tunnels.Post("/register", tunnelHandler.Register)
+	tunnels.Post("/heartbeat", tunnelHandler.Heartbeat)
+	tunnels.Get("/:id", tunnelHandler.Show)
+	tunnels.Put("/:id", tunnelHandler.Update)
+	tunnels.Delete("/:id", tunnelHandler.Delete)
+	tunnels.Get("/:id/status", tunnelHandler.Status)
+
 	// AI Sessions
 	ai := protected.Group("/ai/sessions")
 	ai.Get("/", aiHandler.List)
@@ -147,6 +194,7 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 	// Team (current user's team — matches Next.js frontend endpoints)
 	protected.Get("/team", teamHandler.MyTeam)
 	protected.Patch("/team", teamHandler.UpdateMyTeam)
+	protected.Post("/team/avatar", teamHandler.UploadTeamAvatar)
 	protected.Get("/team/members", teamHandler.MyTeamMembers)
 
 	// Teams (multi-team API)
@@ -157,6 +205,11 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 	teams.Delete("/:id", teamHandler.Delete)
 	teams.Post("/:id/invite", teamHandler.Invite)
 
+	// Global search
+	protected.Get("/search", searchHandler.Search)
+	protected.Get("/search/suggestions", searchHandler.Suggestions)
+	protected.Post("/search/ai", searchHandler.AiSearch)
+
 	// Notifications (user)
 	protected.Get("/notifications", settingsHandler.ListNotifications)
 	protected.Patch("/notifications/:id/read", settingsHandler.MarkNotificationRead)
@@ -164,6 +217,7 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 	// Settings
 	settingsGroup := protected.Group("/settings")
 	settingsGroup.Patch("/profile", settingsHandler.UpdateProfile)
+	settingsGroup.Post("/avatar", settingsHandler.UploadAvatar)
 	settingsGroup.Get("/sessions", settingsHandler.ListSessions)
 	settingsGroup.Delete("/sessions/:id", settingsHandler.RevokeSession)
 	settingsGroup.Get("/api-keys", settingsHandler.ListApiKeys)
@@ -212,6 +266,7 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 	admin.Get("/issues", adminCmsHandler.ListIssues)
 	admin.Patch("/issues/:id", adminCmsHandler.UpdateIssue)
 	admin.Post("/notifications/send", adminCmsHandler.SendNotification)
+	admin.Post("/notifications/seed", adminCmsHandler.SeedNotifications)
 	admin.Get("/notifications", adminCmsHandler.ListNotificationsSent)
 
 	// Admin system settings

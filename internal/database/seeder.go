@@ -285,14 +285,16 @@ func SeedDefaults(db *gorm.DB) {
 			continue
 		}
 
-		s := models.SystemSetting{Key: key}
-		result := db.Where("key = ?", key).FirstOrCreate(&s, models.SystemSetting{
-			Key:   key,
-			Value: raw,
-		})
+		var count int64
+		db.Model(&models.SystemSetting{}).Where("key = ?", key).Count(&count)
+		if count > 0 {
+			continue
+		}
+
+		result := db.Create(&models.SystemSetting{Key: key, Value: raw})
 		if result.Error != nil {
 			log.Printf("seeder: failed to seed %s: %v", key, result.Error)
-		} else if result.RowsAffected > 0 {
+		} else {
 			log.Printf("seeder: seeded default %s", key)
 		}
 	}

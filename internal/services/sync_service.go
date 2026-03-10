@@ -49,6 +49,18 @@ func (s *SyncService) Apply(record SyncRecord, userID uint, db *gorm.DB) error {
 		return s.applyNote(record, userID, payload, db)
 	case "ai_session":
 		return s.applyAiSession(record, userID, payload, db)
+	case "plan":
+		return s.applyPlan(record, userID, payload, db)
+	case "person":
+		return s.applyPerson(record, userID, payload, db)
+	case "request":
+		return s.applyRequest(record, userID, payload, db)
+	case "assignment_rule":
+		return s.applyAssignmentRule(record, userID, payload, db)
+	case "session_turn":
+		return s.applySessionTurn(record, userID, payload, db)
+	case "doc":
+		return s.applyDoc(record, userID, payload, db)
 	default:
 		// Unknown entity type — skip silently
 		return nil
@@ -294,4 +306,296 @@ func (s *SyncService) applyFeature(record SyncRecord, userID uint, payload datat
 	}
 	// Existing record — update in place.
 	return db.Save(&feature).Error
+}
+
+func (s *SyncService) applyPlan(record SyncRecord, userID uint, payload datatypes.JSON, db *gorm.DB) error {
+	var data map[string]interface{}
+	_ = json.Unmarshal(record.Payload, &data)
+
+	planID := record.EntityID
+	if v, ok := data["id"].(string); ok {
+		planID = v
+	}
+
+	if record.Action == "delete" {
+		return db.Where("plan_id = ? AND user_id = ?", planID, userID).
+			Delete(&models.Plan{}).Error
+	}
+
+	var plan models.Plan
+	err := db.Where("plan_id = ? AND user_id = ?", planID, userID).First(&plan).Error
+	if err == nil && int64(plan.Version) >= record.Version {
+		return nil
+	}
+
+	plan.UserID = userID
+	plan.PlanID = planID
+	plan.Version = int(record.Version)
+	plan.Meta = payload
+	if v, ok := data["project_slug"].(string); ok {
+		plan.ProjectSlug = v
+	}
+	if v, ok := data["title"].(string); ok {
+		plan.Title = v
+	}
+	if v, ok := data["description"].(string); ok {
+		plan.Description = v
+	}
+	if v, ok := data["status"].(string); ok {
+		plan.Status = v
+	}
+	if v, ok := data["body"].(string); ok {
+		plan.Body = v
+	}
+	if record.TeamID != nil {
+		plan.TeamID = record.TeamID
+	}
+
+	if plan.Base.ID == "" {
+		return db.Create(&plan).Error
+	}
+	return db.Save(&plan).Error
+}
+
+func (s *SyncService) applyPerson(record SyncRecord, userID uint, payload datatypes.JSON, db *gorm.DB) error {
+	var data map[string]interface{}
+	_ = json.Unmarshal(record.Payload, &data)
+
+	personID := record.EntityID
+	if v, ok := data["id"].(string); ok {
+		personID = v
+	}
+
+	if record.Action == "delete" {
+		return db.Where("person_id = ? AND user_id = ?", personID, userID).
+			Delete(&models.Person{}).Error
+	}
+
+	var person models.Person
+	err := db.Where("person_id = ? AND user_id = ?", personID, userID).First(&person).Error
+	if err == nil && int64(person.Version) >= record.Version {
+		return nil
+	}
+
+	person.UserID = userID
+	person.PersonID = personID
+	person.Version = int(record.Version)
+	person.Meta = payload
+	if v, ok := data["project_slug"].(string); ok {
+		person.ProjectSlug = v
+	}
+	if v, ok := data["name"].(string); ok {
+		person.Name = v
+	}
+	if v, ok := data["email"].(string); ok {
+		person.Email = v
+	}
+	if v, ok := data["role"].(string); ok {
+		person.Role = v
+	}
+	if v, ok := data["status"].(string); ok {
+		person.Status = v
+	}
+	if v, ok := data["bio"].(string); ok {
+		person.Bio = v
+	}
+	if v, ok := data["body"].(string); ok {
+		person.Body = v
+	}
+	if record.TeamID != nil {
+		person.TeamID = record.TeamID
+	}
+
+	if person.Base.ID == "" {
+		return db.Create(&person).Error
+	}
+	return db.Save(&person).Error
+}
+
+func (s *SyncService) applyRequest(record SyncRecord, userID uint, payload datatypes.JSON, db *gorm.DB) error {
+	var data map[string]interface{}
+	_ = json.Unmarshal(record.Payload, &data)
+
+	requestID := record.EntityID
+	if v, ok := data["id"].(string); ok {
+		requestID = v
+	}
+
+	if record.Action == "delete" {
+		return db.Where("request_id = ? AND user_id = ?", requestID, userID).
+			Delete(&models.Request{}).Error
+	}
+
+	var request models.Request
+	err := db.Where("request_id = ? AND user_id = ?", requestID, userID).First(&request).Error
+	if err == nil && int64(request.Version) >= record.Version {
+		return nil
+	}
+
+	request.UserID = userID
+	request.RequestID = requestID
+	request.Version = int(record.Version)
+	request.Meta = payload
+	if v, ok := data["project_slug"].(string); ok {
+		request.ProjectSlug = v
+	}
+	if v, ok := data["title"].(string); ok {
+		request.Title = v
+	}
+	if v, ok := data["description"].(string); ok {
+		request.Description = v
+	}
+	if v, ok := data["kind"].(string); ok {
+		request.Kind = v
+	}
+	if v, ok := data["priority"].(string); ok {
+		request.Priority = v
+	}
+	if v, ok := data["status"].(string); ok {
+		request.Status = v
+	}
+	if v, ok := data["body"].(string); ok {
+		request.Body = v
+	}
+	if record.TeamID != nil {
+		request.TeamID = record.TeamID
+	}
+
+	if request.Base.ID == "" {
+		return db.Create(&request).Error
+	}
+	return db.Save(&request).Error
+}
+
+func (s *SyncService) applyAssignmentRule(record SyncRecord, userID uint, payload datatypes.JSON, db *gorm.DB) error {
+	var data map[string]interface{}
+	_ = json.Unmarshal(record.Payload, &data)
+
+	ruleID := record.EntityID
+	if v, ok := data["id"].(string); ok {
+		ruleID = v
+	}
+
+	if record.Action == "delete" {
+		return db.Where("rule_id = ? AND user_id = ?", ruleID, userID).
+			Delete(&models.AssignmentRule{}).Error
+	}
+
+	var rule models.AssignmentRule
+	err := db.Where("rule_id = ? AND user_id = ?", ruleID, userID).First(&rule).Error
+	if err == nil && int64(rule.Version) >= record.Version {
+		return nil
+	}
+
+	rule.UserID = userID
+	rule.RuleID = ruleID
+	rule.Version = int(record.Version)
+	rule.Meta = payload
+	if v, ok := data["project_slug"].(string); ok {
+		rule.ProjectSlug = v
+	}
+	if v, ok := data["kind"].(string); ok {
+		rule.Kind = v
+	}
+	if v, ok := data["person_id"].(string); ok {
+		rule.PersonID = v
+	}
+	if v, ok := data["body"].(string); ok {
+		rule.Body = v
+	}
+	if record.TeamID != nil {
+		rule.TeamID = record.TeamID
+	}
+
+	if rule.Base.ID == "" {
+		return db.Create(&rule).Error
+	}
+	return db.Save(&rule).Error
+}
+
+func (s *SyncService) applySessionTurn(record SyncRecord, userID uint, payload datatypes.JSON, db *gorm.DB) error {
+	var data map[string]interface{}
+	_ = json.Unmarshal(record.Payload, &data)
+
+	turnID := record.EntityID
+	sessionID := ""
+	if v, ok := data["session_id"].(string); ok {
+		sessionID = v
+	}
+
+	if record.Action == "delete" {
+		return db.Where("turn_id = ? AND user_id = ?", turnID, userID).
+			Delete(&models.SessionTurn{}).Error
+	}
+
+	var turn models.SessionTurn
+	err := db.Where("turn_id = ? AND session_id = ? AND user_id = ?", turnID, sessionID, userID).First(&turn).Error
+	if err == nil && int64(turn.Version) >= record.Version {
+		return nil
+	}
+
+	turn.UserID = userID
+	turn.TurnID = turnID
+	turn.SessionID = sessionID
+	turn.Version = int(record.Version)
+	turn.Meta = payload
+	if v, ok := data["body"].(string); ok {
+		turn.Body = v
+	}
+
+	if turn.Base.ID == "" {
+		return db.Create(&turn).Error
+	}
+	return db.Save(&turn).Error
+}
+
+func (s *SyncService) applyDoc(record SyncRecord, userID uint, payload datatypes.JSON, db *gorm.DB) error {
+	var data map[string]interface{}
+	_ = json.Unmarshal(record.Payload, &data)
+
+	docID := record.EntityID
+	if v, ok := data["id"].(string); ok {
+		docID = v
+	} else if v, ok := data["slug"].(string); ok {
+		docID = v
+	}
+
+	if record.Action == "delete" {
+		return db.Where("doc_id = ? AND user_id = ?", docID, userID).
+			Delete(&models.Doc{}).Error
+	}
+
+	var doc models.Doc
+	err := db.Where("doc_id = ? AND user_id = ?", docID, userID).First(&doc).Error
+	if err == nil && int64(doc.Version) >= record.Version {
+		return nil
+	}
+
+	doc.UserID = userID
+	doc.DocID = docID
+	doc.Version = int(record.Version)
+	doc.Meta = payload
+	if v, ok := data["project_slug"].(string); ok {
+		doc.ProjectSlug = v
+	}
+	if v, ok := data["title"].(string); ok {
+		doc.Title = v
+	}
+	if v, ok := data["category"].(string); ok {
+		doc.Category = v
+	}
+	if v, ok := data["parent_id"].(string); ok {
+		doc.ParentID = v
+	}
+	if v, ok := data["body"].(string); ok {
+		doc.Body = v
+	}
+	if record.TeamID != nil {
+		doc.TeamID = record.TeamID
+	}
+
+	if doc.Base.ID == "" {
+		return db.Create(&doc).Error
+	}
+	return db.Save(&doc).Error
 }

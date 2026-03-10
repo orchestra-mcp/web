@@ -3,6 +3,10 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/orchestra-mcp/web/internal/middleware"
@@ -44,6 +48,7 @@ func (h *TeamHandler) List(c fiber.Ctx) error {
 				"name":         m.Team.Name,
 				"slug":         m.Team.Slug,
 				"plan":         m.Team.Plan,
+				"avatar_url":   m.Team.AvatarURL,
 				"member_count": memberCount,
 				"created_at":   m.Team.CreatedAt,
 			},
@@ -120,7 +125,10 @@ func (h *TeamHandler) Show(c fiber.Ctx) error {
 	return c.JSON(membership.Team)
 }
 
-// MyTeam handles GET /api/team — returns the user's first team
+// MyTeam handles GET /api/team — returns the user's active team.
+// Accepts optional ?team_id query param to select a specific team.
+// If no team_id is provided, returns the user's first team.
+// If the user has no team yet, a default "Personal" team is auto-created.
 func (h *TeamHandler) MyTeam(c fiber.Ctx) error {
 	user := middleware.CurrentUser(c)
 	if user == nil {
@@ -128,10 +136,44 @@ func (h *TeamHandler) MyTeam(c fiber.Ctx) error {
 	}
 
 	var membership models.Membership
-	if err := h.db.Where("user_id = ?", user.ID).
-		Preload("Team").
-		First(&membership).Error; err != nil {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "no team found"})
+	q := h.db.Where("user_id = ?", user.ID).Preload("Team")
+	if teamID := c.Query("team_id"); teamID != "" {
+		q = q.Where("team_id = ?", teamID)
+	}
+	if err := q.First(&membership).Error; err != nil {
+		// Auto-create a default "Personal" team for the user.
+		teamName := user.Name + "'s Team"
+		if user.Name == "" {
+			teamName = "Personal"
+		}
+		base := slugify(teamName)
+		slug := base
+		for i := 2; ; i++ {
+			var count int64
+			h.db.Model(&models.Team{}).Where("slug = ?", slug).Count(&count)
+			if count == 0 {
+				break
+			}
+			slug = fmt.Sprintf("%s-%d", base, i)
+		}
+
+		team := models.Team{
+			Name: teamName,
+			Slug: slug,
+		}
+		if err := h.db.Create(&team).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create default team"})
+		}
+
+		membership = models.Membership{
+			UserID: user.ID,
+			TeamID: team.ID,
+			Role:   "owner",
+		}
+		if err := h.db.Create(&membership).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create membership"})
+		}
+		membership.Team = team
 	}
 
 	// Count members
@@ -145,6 +187,7 @@ func (h *TeamHandler) MyTeam(c fiber.Ctx) error {
 			"slug":         membership.Team.Slug,
 			"description":  "",
 			"plan":         membership.Team.Plan,
+			"avatar_url":   membership.Team.AvatarURL,
 			"member_count": memberCount,
 			"created_at":   membership.Team.CreatedAt,
 			"owner_id":     user.ID,
@@ -153,6 +196,7 @@ func (h *TeamHandler) MyTeam(c fiber.Ctx) error {
 }
 
 // MyTeamMembers handles GET /api/team/members
+// Accepts optional ?team_id query param to select a specific team.
 func (h *TeamHandler) MyTeamMembers(c fiber.Ctx) error {
 	user := middleware.CurrentUser(c)
 	if user == nil {
@@ -161,7 +205,11 @@ func (h *TeamHandler) MyTeamMembers(c fiber.Ctx) error {
 
 	// Find user's team
 	var myMembership models.Membership
-	if err := h.db.Where("user_id = ?", user.ID).First(&myMembership).Error; err != nil {
+	q := h.db.Where("user_id = ?", user.ID)
+	if teamID := c.Query("team_id"); teamID != "" {
+		q = q.Where("team_id = ?", teamID)
+	}
+	if err := q.First(&myMembership).Error; err != nil {
 		return c.JSON(fiber.Map{"members": []fiber.Map{}})
 	}
 
@@ -173,22 +221,24 @@ func (h *TeamHandler) MyTeamMembers(c fiber.Ctx) error {
 	}
 
 	type MemberRow struct {
-		ID       uint   `json:"id"`
-		Name     string `json:"name"`
-		Email    string `json:"email"`
-		Role     string `json:"role"`
-		Status   string `json:"status"`
-		JoinedAt string `json:"joined_at"`
+		ID        uint   `json:"id"`
+		Name      string `json:"name"`
+		Email     string `json:"email"`
+		Role      string `json:"role"`
+		Status    string `json:"status"`
+		AvatarURL string `json:"avatar_url"`
+		JoinedAt  string `json:"joined_at"`
 	}
 	rows := make([]MemberRow, len(memberships))
 	for i, m := range memberships {
 		rows[i] = MemberRow{
-			ID:       m.User.ID,
-			Name:     m.User.Name,
-			Email:    m.User.Email,
-			Role:     m.User.Role,
-			Status:   m.User.Status,
-			JoinedAt: m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+			ID:        m.User.ID,
+			Name:      m.User.Name,
+			Email:     m.User.Email,
+			Role:      m.User.Role,
+			Status:    m.User.Status,
+			AvatarURL: m.User.AvatarURL,
+			JoinedAt:  m.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
 		}
 	}
 
@@ -196,6 +246,7 @@ func (h *TeamHandler) MyTeamMembers(c fiber.Ctx) error {
 }
 
 // UpdateMyTeam handles PATCH /api/team
+// Accepts optional ?team_id query param to select a specific team.
 func (h *TeamHandler) UpdateMyTeam(c fiber.Ctx) error {
 	user := middleware.CurrentUser(c)
 	if user == nil {
@@ -203,8 +254,11 @@ func (h *TeamHandler) UpdateMyTeam(c fiber.Ctx) error {
 	}
 
 	var myMembership models.Membership
-	if err := h.db.Where("user_id = ? AND role IN ?", user.ID, []string{"owner", "admin"}).
-		First(&myMembership).Error; err != nil {
+	q := h.db.Where("user_id = ? AND role IN ?", user.ID, []string{"owner", "admin"})
+	if teamID := c.Query("team_id"); teamID != "" {
+		q = q.Where("team_id = ?", teamID)
+	}
+	if err := q.First(&myMembership).Error; err != nil {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "insufficient permissions"})
 	}
 
@@ -225,7 +279,27 @@ func (h *TeamHandler) UpdateMyTeam(c fiber.Ctx) error {
 		h.db.Model(&models.Team{}).Where("id = ?", myMembership.TeamID).Updates(updates)
 	}
 
-	return c.JSON(fiber.Map{"ok": true})
+	// Return the updated team
+	var updatedTeam models.Team
+	h.db.First(&updatedTeam, "id = ?", myMembership.TeamID)
+
+	var memberCount int64
+	h.db.Model(&models.Membership{}).Where("team_id = ?", myMembership.TeamID).Count(&memberCount)
+
+	return c.JSON(fiber.Map{
+		"ok": true,
+		"team": fiber.Map{
+			"id":           updatedTeam.ID,
+			"name":         updatedTeam.Name,
+			"slug":         updatedTeam.Slug,
+			"description":  "",
+			"plan":         updatedTeam.Plan,
+			"avatar_url":   updatedTeam.AvatarURL,
+			"member_count": memberCount,
+			"created_at":   updatedTeam.CreatedAt,
+			"owner_id":     user.ID,
+		},
+	})
 }
 
 // Delete handles DELETE /api/teams/:id
@@ -306,4 +380,61 @@ func (h *TeamHandler) Invite(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"ok": true})
+}
+
+// UploadTeamAvatar handles POST /api/team/avatar
+// Accepts optional ?team_id query param to select a specific team.
+func (h *TeamHandler) UploadTeamAvatar(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	// Must be owner or admin of the team
+	var myMembership models.Membership
+	q := h.db.Where("user_id = ? AND role IN ?", user.ID, []string{"owner", "admin"}).Preload("Team")
+	if teamID := c.Query("team_id"); teamID != "" {
+		q = q.Where("team_id = ?", teamID)
+	}
+	if err := q.First(&myMembership).Error; err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "insufficient permissions"})
+	}
+
+	file, err := c.FormFile("avatar")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "avatar file is required"})
+	}
+
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".gif" && ext != ".webp" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid file type, must be jpg/png/gif/webp"})
+	}
+
+	if file.Size > 2*1024*1024 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file too large, max 2MB"})
+	}
+
+	uploadDir := "uploads/avatars"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create upload directory"})
+	}
+
+	filename := fmt.Sprintf("team-%s-%d%s", myMembership.TeamID, time.Now().Unix(), ext)
+	savePath := filepath.Join(uploadDir, filename)
+	if err := c.SaveFile(file, savePath); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save file"})
+	}
+
+	// Delete old avatar file if it exists
+	if myMembership.Team.AvatarURL != "" && strings.HasPrefix(myMembership.Team.AvatarURL, "/uploads/avatars/") {
+		oldPath := strings.TrimPrefix(myMembership.Team.AvatarURL, "/")
+		_ = os.Remove(oldPath)
+	}
+
+	avatarURL := "/" + savePath
+	if err := h.db.Model(&models.Team{}).Where("id = ?", myMembership.TeamID).Update("avatar_url", avatarURL).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update avatar"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true, "avatar_url": avatarURL})
 }

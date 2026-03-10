@@ -35,6 +35,7 @@ func main() {
 	}
 
 	database.SeedDefaults(db)
+	database.ScanDocs(db)
 
 	app := fiber.New(fiber.Config{
 		ReadTimeout:  30 * time.Second,
@@ -51,7 +52,9 @@ func main() {
 
 	go func() {
 		log.Printf("Orchestra Web API listening on %s", *addr)
-		if err := app.Listen(*addr); err != nil {
+		if err := app.Listen(*addr, fiber.ListenConfig{
+			DisableStartupMessage: true,
+		}); err != nil {
 			log.Printf("server stopped: %v", err)
 		}
 	}()

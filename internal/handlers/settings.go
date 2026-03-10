@@ -5,6 +5,10 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
+	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
@@ -78,6 +82,57 @@ func (h *SettingsHandler) UpdateProfile(c fiber.Ctx) error {
 
 	h.db.First(user, user.ID)
 	return c.JSON(user)
+}
+
+// UploadAvatar handles POST /api/settings/avatar
+func (h *SettingsHandler) UploadAvatar(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	file, err := c.FormFile("avatar")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "avatar file is required"})
+	}
+
+	// Validate file type
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".gif" && ext != ".webp" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid file type, must be jpg/png/gif/webp"})
+	}
+
+	// Validate file size (max 2MB)
+	if file.Size > 2*1024*1024 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file too large, max 2MB"})
+	}
+
+	// Ensure uploads directory exists
+	uploadDir := "uploads/avatars"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create upload directory"})
+	}
+
+	// Save file with unique name
+	filename := fmt.Sprintf("%d-%d%s", user.ID, time.Now().Unix(), ext)
+	savePath := filepath.Join(uploadDir, filename)
+	if err := c.SaveFile(file, savePath); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save file"})
+	}
+
+	// Delete old avatar file if it exists
+	if user.AvatarURL != "" && strings.HasPrefix(user.AvatarURL, "/uploads/avatars/") {
+		oldPath := strings.TrimPrefix(user.AvatarURL, "/")
+		_ = os.Remove(oldPath)
+	}
+
+	// Update user record
+	avatarURL := "/" + savePath
+	if err := h.db.Model(user).Update("avatar_url", avatarURL).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update avatar"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true, "avatar_url": avatarURL})
 }
 
 // ListSessions handles GET /api/settings/sessions

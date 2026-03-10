@@ -2,9 +2,11 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/orchestra-mcp/web/internal/hub"
 	"github.com/orchestra-mcp/web/internal/middleware"
 	"github.com/orchestra-mcp/web/internal/models"
 	"github.com/orchestra-mcp/web/internal/services"
@@ -16,11 +18,12 @@ import (
 type AdminCmsHandler struct {
 	db          *gorm.DB
 	authService *services.AuthService
+	hub         *hub.Hub
 }
 
 // NewAdminCmsHandlerWithAuth creates a new AdminCmsHandler with auth service.
-func NewAdminCmsHandlerWithAuth(db *gorm.DB, authSvc *services.AuthService) *AdminCmsHandler {
-	return &AdminCmsHandler{db: db, authService: authSvc}
+func NewAdminCmsHandlerWithAuth(db *gorm.DB, authSvc *services.AuthService, wsHub *hub.Hub) *AdminCmsHandler {
+	return &AdminCmsHandler{db: db, authService: authSvc, hub: wsHub}
 }
 
 // GetUser handles GET /api/admin/users/:id
@@ -219,6 +222,22 @@ func (h *AdminCmsHandler) NotifyUser(c fiber.Ctx) error {
 		Type:    notifType,
 	}
 	h.db.Create(&notif)
+
+	// Push realtime notification via WebSocket
+	if h.hub != nil {
+		h.hub.BroadcastToUser(user.ID, hub.Event{
+			Type:       "notification",
+			EntityType: "notification",
+			EntityID:   fmt.Sprintf("%d", notif.ID),
+			Action:     "upsert",
+			UserID:     user.ID,
+			Timestamp:  notif.CreatedAt.UnixMilli(),
+			Title:      notif.Title,
+			Message:    notif.Message,
+			NType:      notif.Type,
+		})
+	}
+
 	return c.JSON(fiber.Map{"ok": true})
 }
 
@@ -541,6 +560,21 @@ func (h *AdminCmsHandler) SendNotification(c fiber.Ctx) error {
 			Type:    notifType,
 		}
 		h.db.Create(&notif)
+
+		// Push realtime notification via WebSocket
+		if h.hub != nil {
+			h.hub.BroadcastToUser(uid, hub.Event{
+				Type:       "notification",
+				EntityType: "notification",
+				EntityID:   fmt.Sprintf("%d", notif.ID),
+				Action:     "upsert",
+				UserID:     uid,
+				Timestamp:  notif.CreatedAt.UnixMilli(),
+				Title:      notif.Title,
+				Message:    notif.Message,
+				NType:      notif.Type,
+			})
+		}
 	}
 
 	return c.JSON(fiber.Map{"ok": true, "sent_to": len(targetIDs)})
@@ -554,4 +588,45 @@ func (h *AdminCmsHandler) ListNotificationsSent(c fiber.Ctx) error {
 	var notifications []models.Notification
 	h.db.Order("created_at DESC").Limit(100).Find(&notifications)
 	return c.JSON(fiber.Map{"notifications": notifications})
+}
+
+// SeedNotifications handles POST /api/admin/notifications/seed
+// Creates sample notifications for the current user (for testing realtime flow).
+func (h *AdminCmsHandler) SeedNotifications(c fiber.Ctx) error {
+	if !isAdmin(c) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin access required"})
+	}
+
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	seeds := []models.Notification{
+		{UserID: user.ID, Title: "Welcome to Orchestra", Message: "Your workspace is ready. Start by creating a project.", Type: "info"},
+		{UserID: user.ID, Title: "Feature completed", Message: "FEAT-ABC has been moved to done by the AI agent.", Type: "success"},
+		{UserID: user.ID, Title: "Build failed", Message: "CI pipeline for branch feature/auth failed at test step.", Type: "error"},
+		{UserID: user.ID, Title: "Review requested", Message: "FEAT-XYZ is waiting for your review approval.", Type: "warning"},
+		{UserID: user.ID, Title: "New team member", Message: "Alice joined your team as a developer.", Type: "info"},
+	}
+
+	for i := range seeds {
+		h.db.Create(&seeds[i])
+
+		if h.hub != nil {
+			h.hub.BroadcastToUser(user.ID, hub.Event{
+				Type:       "notification",
+				EntityType: "notification",
+				EntityID:   fmt.Sprintf("%d", seeds[i].ID),
+				Action:     "upsert",
+				UserID:     user.ID,
+				Timestamp:  seeds[i].CreatedAt.UnixMilli(),
+				Title:      seeds[i].Title,
+				Message:    seeds[i].Message,
+				NType:      seeds[i].Type,
+			})
+		}
+	}
+
+	return c.JSON(fiber.Map{"ok": true, "seeded": len(seeds)})
 }
