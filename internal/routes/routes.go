@@ -11,7 +11,7 @@ import (
 )
 
 // Register wires all route handlers onto the Fiber app.
-func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
+func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*services.WorkspaceManager) {
 	// Health check (unauthenticated, used by deploy scripts and monitoring).
 	app.Get("/health", func(c fiber.Ctx) error {
 		sqlDB, err := db.DB()
@@ -65,6 +65,13 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 	searchHandler := handlers.NewSearchHandler(db)
 	docHandler := handlers.NewDocHandler(db)
 	wsHandler := handlers.NewWebSocketHandler(wsHub, db, cfg)
+	var workspaceManager *services.WorkspaceManager
+	if len(wsMgr) > 0 && wsMgr[0] != nil {
+		workspaceManager = wsMgr[0]
+	} else {
+		workspaceManager = services.NewWorkspaceManager(db, cfg.RepoBaseDir)
+	}
+	repoHandler := handlers.NewRepoWorkspaceHandler(db, workspaceManager)
 
 	api := app.Group("/api")
 
@@ -176,6 +183,16 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config) {
 	tunnels.Put("/:id", tunnelHandler.Update)
 	tunnels.Delete("/:id", tunnelHandler.Delete)
 	tunnels.Get("/:id/status", tunnelHandler.Status)
+
+	// Repos (workspace management)
+	repos := protected.Group("/repos")
+	repos.Get("/github", repoHandler.GitHubRepos)
+	repos.Get("/", repoHandler.List)
+	repos.Post("/", repoHandler.Create)
+	repos.Get("/:id", repoHandler.Show)
+	repos.Post("/:id/sync", repoHandler.Sync)
+	repos.Post("/:id/chat", repoHandler.Chat)
+	repos.Delete("/:id", repoHandler.Delete)
 
 	// AI Sessions
 	ai := protected.Group("/ai/sessions")

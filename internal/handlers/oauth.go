@@ -127,7 +127,7 @@ func (h *OAuthHandler) getProviderConfig(provider string) (*providerConfig, erro
 			AuthURL:      "https://github.com/login/oauth/authorize",
 			TokenURL:     "https://github.com/login/oauth/access_token",
 			UserInfoURL:  "https://api.github.com/user",
-			Scopes:       "user:email",
+			Scopes:       "user:email repo",
 		}, nil
 	case "slack":
 		return &providerConfig{

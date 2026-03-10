@@ -10,6 +10,7 @@ require (
 	golang.org/x/crypto v0.48.0
 	gorm.io/datatypes v1.2.4
 	gorm.io/driver/postgres v1.5.9
+	gorm.io/driver/sqlite v1.6.0
 	gorm.io/gorm v1.30.0
 )
 
@@ -37,5 +38,4 @@ require (
 	golang.org/x/sys v0.41.0 // indirect
 	golang.org/x/text v0.34.0 // indirect
 	gorm.io/driver/mysql v1.5.6 // indirect
-	gorm.io/driver/sqlite v1.6.0 // indirect
 )

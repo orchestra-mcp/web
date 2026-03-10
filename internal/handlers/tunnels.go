@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 
@@ -19,6 +20,9 @@ import (
 type claimEntry struct {
 	TunnelID        string
 	ConnectionToken string
+	TeamID          string // user's active team (for sync scoping)
+	AuthToken       string // user's JWT (for sync API auth)
+	Workspace       string // workspace path from the CLI
 	ExpiresAt       time.Time
 }
 
@@ -142,6 +146,13 @@ func (h *TunnelHandler) Register(c fiber.Ctx) error {
 		name = tokenInfo.Hostname
 	}
 
+	// Look up the user's active team (first membership).
+	var membership models.Membership
+	var teamID string
+	if err := h.db.Where("user_id = ?", user.ID).Order("created_at asc").First(&membership).Error; err == nil {
+		teamID = membership.TeamID
+	}
+
 	now := time.Now()
 	tunnel := models.Tunnel{
 		UserID:          user.ID,
@@ -155,11 +166,21 @@ func (h *TunnelHandler) Register(c fiber.Ctx) error {
 		LastSeenAt:      &now,
 		ToolCount:       tokenInfo.ToolCount,
 		LocalIP:         tokenInfo.LocalIP,
+		Workspace:       tokenInfo.Workspace,
 		Version:         "1.0.0",
+	}
+	if teamID != "" {
+		tunnel.TeamID = &teamID
 	}
 
 	if err := h.db.Create(&tunnel).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to register tunnel"})
+	}
+
+	// Extract the user's auth token from the request header for sync.
+	authToken := ""
+	if header := c.Get("Authorization"); header != "" {
+		authToken = strings.TrimPrefix(header, "Bearer ")
 	}
 
 	// Store claim entry so the local CLI can poll for credentials.
@@ -168,6 +189,9 @@ func (h *TunnelHandler) Register(c fiber.Ctx) error {
 		h.claimMap[tokenInfo.Nonce] = &claimEntry{
 			TunnelID:        tunnel.ID,
 			ConnectionToken: connToken,
+			TeamID:          teamID,
+			AuthToken:       authToken,
+			Workspace:       tokenInfo.Workspace,
 			ExpiresAt:       time.Now().Add(5 * time.Minute),
 		}
 		h.claimMu.Unlock()
@@ -215,6 +239,9 @@ func (h *TunnelHandler) Claim(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"tunnel_id":        entry.TunnelID,
 		"connection_token": entry.ConnectionToken,
+		"team_id":          entry.TeamID,
+		"auth_token":       entry.AuthToken,
+		"workspace":        entry.Workspace,
 	})
 }
 
@@ -373,6 +400,7 @@ type tunnelTokenPayload struct {
 	ToolCount   int    `json:"tool_count"`
 	CreatedAt   string `json:"created_at"`
 	CloudURL    string `json:"cloud_url,omitempty"`
+	Workspace   string `json:"workspace,omitempty"`
 }
 
 // decodeRegistrationToken decodes the base64url-encoded JSON token from the CLI.

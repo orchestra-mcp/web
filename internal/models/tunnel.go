@@ -34,4 +34,5 @@ type Tunnel struct {
 	Version         string         `json:"version"`
 	ToolCount       int            `gorm:"default:0" json:"tool_count"`
 	LocalIP         string         `json:"local_ip,omitempty"`
+	Workspace       string         `json:"workspace,omitempty"`
 }

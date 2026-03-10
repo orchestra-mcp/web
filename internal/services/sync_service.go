@@ -20,6 +20,7 @@ type SyncRecord struct {
 	Version        int64           `json:"version"`
 	IdempotencyKey *string         `json:"idempotency_key"`
 	TeamID         *string         `json:"team_id"`
+	TunnelID       *string         `json:"tunnel_id"`
 }
 
 // SyncService handles LWW sync logic for entity push/pull.

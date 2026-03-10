@@ -12,6 +12,7 @@ type Config struct {
 	OTPExpiry        time.Duration
 	MagicLinkExpiry  time.Duration
 	Env              string
+	RepoBaseDir      string
 }
 
 // Load reads configuration from environment variables and applies defaults.
@@ -31,11 +32,17 @@ func Load() *Config {
 		env = "development"
 	}
 
+	repoBaseDir := os.Getenv("REPO_BASE_DIR")
+	if repoBaseDir == "" {
+		repoBaseDir = "/var/orchestra/repos"
+	}
+
 	return &Config{
 		DSN:             dsn,
 		JWTSecret:       jwtSecret,
 		OTPExpiry:       10 * time.Minute,
 		MagicLinkExpiry: 15 * time.Minute,
 		Env:             env,
+		RepoBaseDir:     repoBaseDir,
 	}
 }

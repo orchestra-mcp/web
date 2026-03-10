@@ -13,6 +13,7 @@ import (
 	"github.com/orchestra-mcp/web/internal/config"
 	"github.com/orchestra-mcp/web/internal/database"
 	"github.com/orchestra-mcp/web/internal/routes"
+	"github.com/orchestra-mcp/web/internal/services"
 )
 
 func main() {
@@ -44,7 +45,12 @@ func main() {
 		AppName:      "Orchestra Web API",
 	})
 
-	routes.Register(app, db, cfg)
+	wsMgr := services.NewWorkspaceManager(db, cfg.RepoBaseDir)
+	routes.Register(app, db, cfg, wsMgr)
+
+	// Start auto-sync loop for repo workspaces.
+	syncStop := make(chan struct{})
+	go wsMgr.AutoSyncLoop(syncStop)
 
 	// Graceful shutdown
 	quit := make(chan os.Signal, 1)
@@ -60,6 +66,7 @@ func main() {
 	}()
 
 	<-quit
+	close(syncStop)
 	log.Println("shutting down server...")
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

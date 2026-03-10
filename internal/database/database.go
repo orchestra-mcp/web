@@ -56,5 +56,6 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.AssignmentRule{},
 		&models.SessionTurn{},
 		&models.Doc{},
+		&models.RepoWorkspace{},
 	)
 }

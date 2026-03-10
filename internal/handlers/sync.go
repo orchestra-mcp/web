@@ -86,8 +86,9 @@ func (h *SyncHandler) Push(c fiber.Ctx) error {
 	}
 
 	var body struct {
-		DeviceID string                  `json:"device_id"`
-		Records  []services.SyncRecord   `json:"records"`
+		DeviceID string                `json:"device_id"`
+		TunnelID string                `json:"tunnel_id"`
+		Records  []services.SyncRecord `json:"records"`
 	}
 	if err := json.Unmarshal(c.Body(), &body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
@@ -115,6 +116,10 @@ func (h *SyncHandler) Push(c fiber.Ctx) error {
 		}
 
 		// Write sync log entry
+		var tunnelIDPtr *string
+		if body.TunnelID != "" {
+			tunnelIDPtr = &body.TunnelID
+		}
 		syncLog := models.SyncLog{
 			UserID:         user.ID,
 			DeviceID:       body.DeviceID,
@@ -125,6 +130,7 @@ func (h *SyncHandler) Push(c fiber.Ctx) error {
 			Version:        record.Version,
 			IdempotencyKey: record.IdempotencyKey,
 			TeamID:         record.TeamID,
+			TunnelID:       tunnelIDPtr,
 		}
 		h.db.Create(&syncLog)
 

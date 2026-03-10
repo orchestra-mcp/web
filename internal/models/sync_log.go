@@ -18,5 +18,6 @@ type SyncLog struct {
 	Version        int64          `json:"version"`
 	IdempotencyKey *string        `gorm:"uniqueIndex:idx_sync_idempotency,where:idempotency_key IS NOT NULL" json:"idempotency_key"`
 	TeamID         *string        `gorm:"type:uuid" json:"team_id"`
+	TunnelID       *string        `gorm:"index" json:"tunnel_id"`
 	CreatedAt      time.Time      `json:"created_at"`
 }
