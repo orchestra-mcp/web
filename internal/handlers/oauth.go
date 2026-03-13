@@ -69,6 +69,13 @@ func (h *OAuthHandler) getProviderConfig(provider string) (*providerConfig, erro
 		return nil, fmt.Errorf("invalid integrations data")
 	}
 
+	// Check if provider is enabled
+	if enabled, ok := data[provider+"_enabled"]; ok {
+		if b, isBool := enabled.(bool); isBool && !b {
+			return nil, fmt.Errorf("%s OAuth is disabled", provider)
+		}
+	}
+
 	// The integrations settings are flat keys like "discord_client_id", "discord_client_secret"
 	// OR nested like {"discord": {"client_id": "...", "client_secret": "..."}}
 	// Support both patterns:

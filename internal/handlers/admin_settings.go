@@ -2,11 +2,15 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
+	"net/smtp"
+	"strings"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/orchestra-mcp/web/internal/helpers"
 	"github.com/orchestra-mcp/web/internal/models"
-	"gorm.io/gorm/clause"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 // AdminSettingsHandler handles system settings key-value endpoints.
@@ -21,36 +25,43 @@ func NewAdminSettingsHandler(db *gorm.DB) *AdminSettingsHandler {
 
 // validKeys lists the allowed settings keys.
 var validKeys = map[string]bool{
-	"general":      true,
-	"features":     true,
-	"homepage":     true,
-	"agents":       true,
-	"contact":      true,
-	"pricing":      true,
-	"download":     true,
-	"integrations": true,
-	"smtp":         true,
-	"seo":          true,
-	"discord":      true,
-	"slack":        true,
-	"coming_soon":  true,
-	"marketplace":  true,
-	"plugins":      true,
-	"docs":         true,
-	"blog":         true,
+	"general":          true,
+	"features":         true,
+	"homepage":         true,
+	"agents":           true,
+	"contact":          true,
+	"pricing":          true,
+	"download":         true,
+	"integrations":     true,
+	"smtp":             true,
+	"seo":              true,
+	"discord":          true,
+	"slack":            true,
+	"coming_soon":      true,
+	"marketplace":      true,
+	"plugins":          true,
+	"docs":             true,
+	"blog":             true,
+	"aimodels":         true,
+	"social_platforms": true,
+	"sponsors":         true,
+	"community":        true,
+	"github":           true,
 }
 
 // publicKeys lists settings keys readable without authentication.
 var publicKeys = map[string]bool{
-	"coming_soon": true,
-	"marketplace": true,
-	"plugins":     true,
-	"homepage":    true,
-	"pricing":     true,
-	"download":    true,
-	"docs":        true,
-	"blog":        true,
-	"general":     true,
+	"coming_soon":  true,
+	"marketplace":  true,
+	"plugins":      true,
+	"homepage":     true,
+	"pricing":      true,
+	"download":     true,
+	"docs":         true,
+	"blog":         true,
+	"general":      true,
+	"features":     true,
+	"integrations": true,
 }
 
 // defaultSettings returns default values for each key.
@@ -66,13 +77,18 @@ func defaultSettings(key string) interface{} {
 			"github_url":       "https://github.com/orchestra-mcp",
 			"discord_url":      "https://discord.gg/orchestra",
 		},
-		"features": []map[string]interface{}{
-			{"key": "blog", "label": "Blog", "enabled": true, "admin_only": false},
-			{"key": "marketplace", "label": "Marketplace", "enabled": true, "admin_only": false},
-			{"key": "docs", "label": "Docs", "enabled": true, "admin_only": false},
-			{"key": "download", "label": "Download", "enabled": true, "admin_only": false},
-			{"key": "solutions", "label": "Solutions", "enabled": true, "admin_only": false},
-			{"key": "pricing", "label": "Pricing", "enabled": true, "admin_only": false},
+		"features": map[string]interface{}{
+			"rag":         true,
+			"multi_agent": true,
+			"marketplace": true,
+			"quic_bridge": true,
+			"web_gateway": true,
+			"packs":       true,
+			"projects":    true,
+			"notes":       true,
+			"plans":       true,
+			"wiki":        true,
+			"devtools":    true,
 		},
 		"homepage": map[string]interface{}{
 			"hero_headline": "The AI-native IDE for every platform",
@@ -154,8 +170,18 @@ func defaultSettings(key string) interface{} {
 			"linux":   map[string]string{"url": "", "version": "1.0.0", "release_date": "2026-03-02", "arch": "x64 + arm64"},
 		},
 		"integrations": map[string]interface{}{
-			"google": map[string]string{"client_id": "", "client_secret": ""},
-			"github": map[string]string{"client_id": "", "client_secret": ""},
+			"google_enabled":       false,
+			"google_client_id":     "",
+			"google_client_secret": "",
+			"github_enabled":       false,
+			"github_client_id":     "",
+			"github_client_secret": "",
+			"discord_enabled":      false,
+			"discord_client_id":    "",
+			"discord_client_secret":"",
+			"slack_enabled":        false,
+			"slack_client_id":      "",
+			"slack_client_secret":  "",
 		},
 		"discord": map[string]interface{}{
 			"enabled":        false,
@@ -355,6 +381,27 @@ func defaultSettings(key string) interface{} {
 				},
 			},
 		},
+		"social_platforms": map[string]interface{}{
+			"platforms": []map[string]interface{}{
+				{"value": "github", "label": "GitHub", "icon": "bxl-github", "placeholder": "https://github.com/..."},
+				{"value": "twitter", "label": "Twitter / X", "icon": "bxl-twitter", "placeholder": "https://twitter.com/..."},
+				{"value": "linkedin", "label": "LinkedIn", "icon": "bxl-linkedin", "placeholder": "https://linkedin.com/in/..."},
+				{"value": "website", "label": "Website", "icon": "bx-globe", "placeholder": "https://..."},
+			},
+		},
+		"sponsors": map[string]interface{}{
+			"headline": "Our Sponsors",
+			"subtext":  "Thanks to our amazing sponsors",
+		},
+		"community": map[string]interface{}{
+			"headline": "Our Community",
+			"subtext":  "Meet the people behind Orchestra",
+		},
+		"github": map[string]interface{}{
+			"token":         "",
+			"default_repos": "orchestra-mcp/framework",
+			"sync_interval": 60,
+		},
 	}
 	if v, ok := defaults[key]; ok {
 		return v
@@ -370,12 +417,41 @@ func (h *AdminSettingsHandler) GetPublicSetting(c fiber.Ctx) error {
 	}
 
 	var setting models.SystemSetting
+	var value interface{}
 	if err := h.db.Where("key = ?", key).First(&setting).Error; err != nil {
-		return c.JSON(fiber.Map{"key": key, "value": defaultSettings(key)})
+		value = defaultSettings(key)
+	} else {
+		_ = json.Unmarshal(setting.Value, &value)
 	}
 
-	var value interface{}
-	_ = json.Unmarshal(setting.Value, &value)
+	// Strip secrets from integrations — only expose *_enabled flags publicly
+	if key == "integrations" {
+		if m, ok := value.(map[string]interface{}); ok {
+			public := map[string]interface{}{}
+			for k, v := range m {
+				if strings.HasSuffix(k, "_enabled") {
+					public[k] = v
+				}
+			}
+			value = public
+		}
+	}
+
+	// Overlay locale-specific translations for public content
+	locale := helpers.ContentLocale(c)
+	if locale != helpers.DefaultLocale {
+		if m, ok := value.(map[string]interface{}); ok {
+			if tr, ok := m["translations"].(map[string]interface{}); ok {
+				if localeData, ok := tr[locale].(map[string]interface{}); ok {
+					for k, v := range localeData {
+						m[k] = v
+					}
+				}
+			}
+			delete(m, "translations")
+		}
+	}
+
 	return c.JSON(fiber.Map{"key": key, "value": value})
 }
 
@@ -392,12 +468,27 @@ func (h *AdminSettingsHandler) GetSetting(c fiber.Ctx) error {
 
 	var setting models.SystemSetting
 	if err := h.db.Where("key = ?", key).First(&setting).Error; err != nil {
-		// Return defaults if not yet set
 		return c.JSON(fiber.Map{"key": key, "value": defaultSettings(key)})
 	}
 
 	var value interface{}
 	_ = json.Unmarshal(setting.Value, &value)
+
+	// Overlay locale-specific translations when requested
+	locale := helpers.ContentLocale(c)
+	if locale != helpers.DefaultLocale {
+		if m, ok := value.(map[string]interface{}); ok {
+			if tr, ok := m["translations"].(map[string]interface{}); ok {
+				if localeData, ok := tr[locale].(map[string]interface{}); ok {
+					for k, v := range localeData {
+						m[k] = v
+					}
+				}
+			}
+			delete(m, "translations")
+		}
+	}
+
 	return c.JSON(fiber.Map{"key": key, "value": value, "updated_at": setting.UpdatedAt})
 }
 
@@ -412,15 +503,43 @@ func (h *AdminSettingsHandler) UpdateSetting(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid settings key"})
 	}
 
-	// Accept the raw JSON body as the value
 	rawValue := c.Body()
 	if len(rawValue) == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "body is required"})
 	}
 
+	locale := helpers.ContentLocale(c)
+
+	var finalValue []byte
+	if locale == helpers.DefaultLocale {
+		finalValue = rawValue
+	} else {
+		// Load existing setting, merge translation into it
+		var existing models.SystemSetting
+		var currentValue map[string]interface{}
+		if err := h.db.Where("key = ?", key).First(&existing).Error; err == nil {
+			_ = json.Unmarshal(existing.Value, &currentValue)
+		}
+		if currentValue == nil {
+			currentValue = map[string]interface{}{}
+		}
+
+		var newFields map[string]interface{}
+		_ = json.Unmarshal(rawValue, &newFields)
+
+		translations, _ := currentValue["translations"].(map[string]interface{})
+		if translations == nil {
+			translations = map[string]interface{}{}
+		}
+		translations[locale] = newFields
+		currentValue["translations"] = translations
+
+		finalValue, _ = json.Marshal(currentValue)
+	}
+
 	setting := models.SystemSetting{
 		Key:   key,
-		Value: rawValue,
+		Value: finalValue,
 	}
 
 	if err := h.db.Clauses(clause.OnConflict{
@@ -431,4 +550,161 @@ func (h *AdminSettingsHandler) UpdateSetting(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"ok": true, "key": key})
+}
+
+// SeedSettings handles POST /api/admin/settings/seed — populates all keys with defaults.
+func (h *AdminSettingsHandler) SeedSettings(c fiber.Ctx) error {
+	if !isAdmin(c) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin access required"})
+	}
+
+	seeded := []string{}
+	for key := range validKeys {
+		defaults := defaultSettings(key)
+		raw, err := json.Marshal(defaults)
+		if err != nil {
+			continue
+		}
+		setting := models.SystemSetting{
+			Key:   key,
+			Value: raw,
+		}
+		if err := h.db.Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "key"}},
+			DoUpdates: clause.AssignmentColumns([]string{"value", "updated_at"}),
+		}).Create(&setting).Error; err != nil {
+			continue
+		}
+		seeded = append(seeded, key)
+	}
+
+	return c.JSON(fiber.Map{"ok": true, "seeded": seeded, "count": len(seeded)})
+}
+
+// TestEmail handles POST /api/admin/settings/test-email — sends a test email using current SMTP config.
+func (h *AdminSettingsHandler) TestEmail(c fiber.Ctx) error {
+	if !isAdmin(c) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin access required"})
+	}
+
+	// Get current user email from context
+	userEmail, _ := c.Locals("email").(string)
+	if userEmail == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "no user email found"})
+	}
+
+	// Load SMTP settings
+	var setting models.SystemSetting
+	smtpCfg := map[string]interface{}{}
+	if err := h.db.Where("key = ?", "smtp").First(&setting).Error; err == nil {
+		_ = json.Unmarshal(setting.Value, &smtpCfg)
+	} else {
+		defaults := defaultSettings("smtp")
+		if m, ok := defaults.(map[string]interface{}); ok {
+			smtpCfg = m
+		}
+	}
+
+	host, _ := smtpCfg["host"].(string)
+	portRaw := smtpCfg["port"]
+	username, _ := smtpCfg["username"].(string)
+	password, _ := smtpCfg["password"].(string)
+	fromName, _ := smtpCfg["from_name"].(string)
+	fromEmail, _ := smtpCfg["from_email"].(string)
+
+	if host == "" || fromEmail == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "SMTP not configured — set host and from_email first"})
+	}
+
+	port := 587
+	switch v := portRaw.(type) {
+	case float64:
+		port = int(v)
+	case int:
+		port = v
+	}
+
+	addr := fmt.Sprintf("%s:%d", host, port)
+	subject := "Orchestra — Test Email"
+	body := fmt.Sprintf("Hello!\n\nThis is a test email from Orchestra sent to %s.\n\nYour SMTP configuration is working correctly.\n\n— Orchestra", userEmail)
+
+	msg := strings.Join([]string{
+		"From: " + fromName + " <" + fromEmail + ">",
+		"To: " + userEmail,
+		"Subject: " + subject,
+		"MIME-Version: 1.0",
+		"Content-Type: text/plain; charset=UTF-8",
+		"",
+		body,
+	}, "\r\n")
+
+	var auth smtp.Auth
+	if username != "" {
+		auth = smtp.PlainAuth("", username, password, host)
+	}
+
+	if err := smtp.SendMail(addr, auth, fromEmail, []string{userEmail}, []byte(msg)); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to send: " + err.Error()})
+	}
+
+	return c.JSON(fiber.Map{"ok": true, "sent_to": userEmail})
+}
+
+// GenerateSitemap handles POST /api/admin/settings/generate-sitemap — returns a sitemap.xml string.
+func (h *AdminSettingsHandler) GenerateSitemap(c fiber.Ctx) error {
+	if !isAdmin(c) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin access required"})
+	}
+
+	// Load general settings for site URL
+	siteURL := "https://orchestra.dev"
+	var generalSetting models.SystemSetting
+	if err := h.db.Where("key = ?", "general").First(&generalSetting).Error; err == nil {
+		var val map[string]interface{}
+		if json.Unmarshal(generalSetting.Value, &val) == nil {
+			if u, ok := val["url"].(string); ok && u != "" {
+				siteURL = strings.TrimRight(u, "/")
+			}
+		}
+	}
+
+	// Load feature flags to know which pages are enabled
+	enabledPages := map[string]bool{
+		"blog": true, "docs": true, "download": true,
+		"solutions": true, "marketplace": true, "pricing": true, "contact": true,
+	}
+	var featureSetting models.SystemSetting
+	if err := h.db.Where("key = ?", "features").First(&featureSetting).Error; err == nil {
+		var val map[string]interface{}
+		if json.Unmarshal(featureSetting.Value, &val) == nil {
+			for k, v := range val {
+				if b, ok := v.(bool); ok {
+					enabledPages[k] = b
+				}
+			}
+		}
+	}
+
+	// Static routes
+	routes := []string{"/", "/login", "/register"}
+	pageRoutes := []string{"/blog", "/docs", "/download", "/solutions", "/marketplace", "/pricing", "/contact"}
+	for _, r := range pageRoutes {
+		key := strings.TrimPrefix(r, "/")
+		if enabled, ok := enabledPages[key]; !ok || enabled {
+			routes = append(routes, r)
+		}
+	}
+
+	var sb strings.Builder
+	sb.WriteString(`<?xml version="1.0" encoding="UTF-8"?>` + "\n")
+	sb.WriteString(`<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` + "\n")
+	for _, route := range routes {
+		sb.WriteString("  <url>\n")
+		sb.WriteString("    <loc>" + siteURL + route + "</loc>\n")
+		sb.WriteString("    <changefreq>weekly</changefreq>\n")
+		sb.WriteString("  </url>\n")
+	}
+	sb.WriteString("</urlset>\n")
+
+	return c.JSON(fiber.Map{"ok": true, "sitemap": sb.String()})
 }

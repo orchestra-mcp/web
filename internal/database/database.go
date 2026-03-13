@@ -57,5 +57,12 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.SessionTurn{},
 		&models.Doc{},
 		&models.RepoWorkspace{},
+		&models.Passkey{},
+		&models.UserIntegration{},
+		&models.Comment{},
+		&models.Sponsor{},
+		&models.CommunityPost{},
+		&models.GitHubIssue{},
+		&models.GitHubRepo{},
 	)
 }

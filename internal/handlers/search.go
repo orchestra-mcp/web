@@ -263,6 +263,91 @@ func (h *SearchHandler) Suggestions(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"results": results})
 }
 
+// PublicSearch handles GET /api/search/public?q=... — unauthenticated search
+// across published blog posts, public docs, and user profiles.
+func (h *SearchHandler) PublicSearch(c fiber.Ctx) error {
+	q := strings.TrimSpace(c.Query("q"))
+	if q == "" {
+		return c.JSON([]searchResultItem{})
+	}
+
+	limit := 20
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 50 {
+			limit = n
+		}
+	}
+
+	pattern := "%" + strings.ToLower(q) + "%"
+	var results []searchResultItem
+
+	// Published blog posts
+	var posts []models.Post
+	h.db.Where("status = ? AND (LOWER(title) LIKE ? OR LOWER(excerpt) LIKE ?)", "published", pattern, pattern).
+		Order("published_at desc").
+		Limit(limit).
+		Find(&posts)
+	for _, p := range posts {
+		desc := p.Excerpt
+		if len(desc) > 120 {
+			desc = desc[:120] + "..."
+		}
+		results = append(results, searchResultItem{
+			ID:          fmt.Sprintf("post-%d", p.ID),
+			Type:        "post",
+			Title:       p.Title,
+			Description: desc,
+			URL:         fmt.Sprintf("/blog/%s", p.Slug),
+			Category:    "post",
+		})
+	}
+
+	// Public docs (no user scope — only docs from the "orchestra" project or with no user)
+	var docs []models.Doc
+	h.db.Where("(LOWER(title) LIKE ? OR LOWER(body) LIKE ? OR LOWER(category) LIKE ?)", pattern, pattern, pattern).
+		Order("updated_at desc").
+		Limit(limit).
+		Find(&docs)
+	for _, d := range docs {
+		desc := d.Body
+		if len(desc) > 120 {
+			desc = desc[:120] + "..."
+		}
+		results = append(results, searchResultItem{
+			ID:          d.DocID,
+			Type:        "doc",
+			Title:       d.Title,
+			Description: desc,
+			URL:         fmt.Sprintf("/docs/%s", d.DocID),
+			Category:    "doc",
+		})
+	}
+
+	// User profiles (public, active users — show name only)
+	var users []models.User
+	h.db.Where("status = ? AND (LOWER(name) LIKE ? OR LOWER(email) LIKE ?)", "active", pattern, pattern).
+		Order("created_at desc").
+		Limit(limit).
+		Find(&users)
+	for _, u := range users {
+		results = append(results, searchResultItem{
+			ID:          fmt.Sprintf("user-%d", u.ID),
+			Type:        "profile",
+			Title:       u.Name,
+			Description: u.Email,
+			URL:         fmt.Sprintf("/profile/%d", u.ID),
+			Category:    "profile",
+		})
+	}
+
+	// Cap total results
+	if len(results) > limit {
+		results = results[:limit]
+	}
+
+	return c.JSON(results)
+}
+
 // AiSearch handles POST /api/search/ai — AI-powered natural language search.
 // Returns a structured prompt with workspace context for the frontend to send to the AI bridge.
 func (h *SearchHandler) AiSearch(c fiber.Ctx) error {

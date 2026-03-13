@@ -207,15 +207,33 @@ func (s *SyncService) applyNote(record SyncRecord, userID uint, payload datatype
 		}
 	}
 
+	var data map[string]interface{}
+	_ = json.Unmarshal(record.Payload, &data)
+
 	note := models.Note{}
 	note.Base.ID = record.EntityID
 	note.UserID = userID
 	note.Version = int(record.Version)
 	note.Meta = payload
+	if v, ok := data["title"].(string); ok {
+		note.Title = v
+	}
+	if v, ok := data["content"].(string); ok {
+		note.Content = v
+	}
+	if v, ok := data["body"].(string); ok && note.Content == "" {
+		note.Content = v
+	}
+	if v, ok := data["pinned"].(bool); ok {
+		note.Pinned = v
+	}
+	if record.TeamID != nil {
+		note.TeamID = record.TeamID
+	}
 
 	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"meta", "version", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"title", "content", "pinned", "meta", "version", "updated_at"}),
 	}).Create(&note).Error
 }
 
@@ -231,15 +249,30 @@ func (s *SyncService) applyAiSession(record SyncRecord, userID uint, payload dat
 		return nil
 	}
 
+	var data map[string]interface{}
+	_ = json.Unmarshal(record.Payload, &data)
+
 	session := models.AiSession{}
 	session.Base.ID = record.EntityID
 	session.UserID = userID
 	session.Version = int(record.Version)
 	session.Meta = payload
+	if v, ok := data["name"].(string); ok {
+		session.Name = v
+	}
+	if v, ok := data["model"].(string); ok {
+		session.Model = v
+	}
+	if v, ok := data["pinned"].(bool); ok {
+		session.Pinned = v
+	}
+	if v, ok := data["message_count"].(float64); ok {
+		session.MessageCount = int(v)
+	}
 
 	return db.Clauses(clause.OnConflict{
 		Columns:   []clause.Column{{Name: "id"}},
-		DoUpdates: clause.AssignmentColumns([]string{"meta", "version", "updated_at"}),
+		DoUpdates: clause.AssignmentColumns([]string{"name", "model", "pinned", "message_count", "meta", "version", "updated_at"}),
 	}).Create(&session).Error
 }
 

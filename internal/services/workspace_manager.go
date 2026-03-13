@@ -58,6 +58,10 @@ func (m *WorkspaceManager) CloneRepo(ws *models.RepoWorkspace, token string) err
 	initCmd.Dir = cloneDir
 	_ = initCmd.Run() // best-effort
 
+	// Security: strip execute permissions on all files. Only docs/, .projects/,
+	// and .claude/ are needed for Orchestra — no code should be executable.
+	m.stripExecutePermissions(cloneDir)
+
 	m.db.Model(ws).Updates(map[string]any{
 		"status":     "ready",
 		"clone_path": cloneDir,
@@ -212,6 +216,32 @@ func (m *WorkspaceManager) syncAll() {
 			log.Printf("[workspace-manager] sync %s failed: %v", ws.ID, err)
 		}
 	}
+}
+
+// stripExecutePermissions removes execute bits from all files in the cloned
+// workspace. Only docs/, .projects/, and .claude/ content is needed by Orchestra.
+// This prevents any cloned code from being accidentally executed on the server.
+func (m *WorkspaceManager) stripExecutePermissions(dir string) {
+	filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		// Skip .git internals — git needs its own permissions intact.
+		rel, _ := filepath.Rel(dir, path)
+		if strings.HasPrefix(rel, ".git"+string(filepath.Separator)) || rel == ".git" {
+			return nil
+		}
+		if info.IsDir() {
+			// Directories need execute (traverse) permission to be listable.
+			return nil
+		}
+		// Strip execute bits: keep read/write only (0644 for files).
+		mode := info.Mode()
+		if mode&0111 != 0 {
+			os.Chmod(path, mode&^0111)
+		}
+		return nil
+	})
 }
 
 func (m *WorkspaceManager) gitExec(dir string, args ...string) {

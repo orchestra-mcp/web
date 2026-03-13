@@ -44,6 +44,7 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	authSvc := services.NewAuthService(db, cfg)
 
 	authHandler := handlers.NewAuthHandler(db, cfg)
+	passkeyHandler := handlers.NewPasskeyHandler(db, cfg)
 	oauthHandler := handlers.NewOAuthHandler(db, cfg)
 	projectHandler := handlers.NewProjectHandler(db)
 	featureHandler := handlers.NewFeatureHandler(db)
@@ -62,7 +63,10 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	tunnelHandler := handlers.NewTunnelHandler(db, tunnelHub)
 	tunnelProxyHandler := handlers.NewTunnelProxyHandler(db, cfg, tunnelHub)
 	tunnelReverseHandler := handlers.NewTunnelReverseHandler(db, tunnelHub)
+	claudeCodeOAuthHandler := handlers.NewClaudeCodeOAuthHandler(db, cfg)
+	userIntegrationsHandler := handlers.NewUserIntegrationsHandler(db)
 	searchHandler := handlers.NewSearchHandler(db)
+	commentHandler := handlers.NewCommentHandler(db)
 	docHandler := handlers.NewDocHandler(db)
 	wsHandler := handlers.NewWebSocketHandler(wsHub, db, cfg)
 	var workspaceManager *services.WorkspaceManager
@@ -82,6 +86,12 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	// Public system docs (from repo docs/ folder, no auth required).
 	api.Get("/docs", docHandler.SystemList)
 	api.Get("/docs/:id", docHandler.SystemShow)
+
+	// Public search (no auth — searches published posts, docs, profiles).
+	api.Get("/search/public", searchHandler.PublicSearch)
+
+	// Blog comments (list is public, create requires auth — handled in protected group).
+	api.Get("/blog/:slug/comments", commentHandler.List)
 
 	// WebSocket routes (before auth middleware — auth done via token query param).
 	api.Get("/ws", wsHandler.Handle)
@@ -104,6 +114,8 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	auth.Post("/api-key-exchange", authHandler.APIKeyExchange)
 	auth.Post("/device/request", authHandler.DeviceRequest)
 	auth.Post("/device/poll", authHandler.DevicePoll)
+	auth.Post("/passkey/authenticate/begin", passkeyHandler.BeginAuthentication)
+	auth.Post("/passkey/authenticate/finish", passkeyHandler.FinishAuthentication)
 
 	// OAuth routes (public — initiates redirect and handles callback)
 	auth.Get("/oauth/:provider", oauthHandler.Redirect)
@@ -113,6 +125,9 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 
 	// Authenticated routes
 	protected := api.Group("", middleware.Auth(db, cfg))
+
+	// Blog comments (create requires auth).
+	protected.Post("/blog/:slug/comments", commentHandler.Create)
 
 	// System docs (auth required for editing)
 	protected.Put("/docs/:id", docHandler.SystemUpdate)
@@ -125,6 +140,8 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	protected.Post("/auth/logout", authHandler.Logout)
 	protected.Patch("/auth/profile", authHandler.UpdateProfile)
 	protected.Post("/auth/device/approve", authHandler.DeviceApprove)
+	protected.Post("/auth/passkey/register/begin", passkeyHandler.BeginRegistration)
+	protected.Post("/auth/passkey/register/finish", passkeyHandler.FinishRegistration)
 
 	// Projects
 	projects := protected.Group("/projects")
@@ -222,6 +239,11 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	teams.Delete("/:id", teamHandler.Delete)
 	teams.Post("/:id/invite", teamHandler.Invite)
 
+	// Claude Code OAuth
+	claudeCode := protected.Group("/oauth/claude-code")
+	claudeCode.Get("/start", claudeCodeOAuthHandler.Start)
+	claudeCode.Post("/exchange", claudeCodeOAuthHandler.Exchange)
+
 	// Global search
 	protected.Get("/search", searchHandler.Search)
 	protected.Get("/search/suggestions", searchHandler.Suggestions)
@@ -235,6 +257,7 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	settingsGroup := protected.Group("/settings")
 	settingsGroup.Patch("/profile", settingsHandler.UpdateProfile)
 	settingsGroup.Post("/avatar", settingsHandler.UploadAvatar)
+	settingsGroup.Post("/cover", settingsHandler.UploadCover)
 	settingsGroup.Get("/sessions", settingsHandler.ListSessions)
 	settingsGroup.Delete("/sessions/:id", settingsHandler.RevokeSession)
 	settingsGroup.Get("/api-keys", settingsHandler.ListApiKeys)
@@ -242,11 +265,25 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	settingsGroup.Delete("/api-keys/:id", settingsHandler.RevokeApiKey)
 	settingsGroup.Get("/connected-accounts", settingsHandler.ListConnectedAccounts)
 	settingsGroup.Delete("/connected-accounts/:provider", settingsHandler.UnlinkAccount)
+	settingsGroup.Get("/passkeys", passkeyHandler.ListPasskeys)
+	settingsGroup.Patch("/passkeys/:id", passkeyHandler.RenamePasskey)
+	settingsGroup.Delete("/passkeys/:id", passkeyHandler.DeletePasskey)
 	settingsGroup.Get("/preferences", settingsHandler.GetPreferences)
 	settingsGroup.Patch("/preferences", settingsHandler.UpdatePreferences)
+	settingsGroup.Get("/integrations/user", userIntegrationsHandler.List)
+	settingsGroup.Put("/integrations/user/:provider", userIntegrationsHandler.Upsert)
+	settingsGroup.Delete("/integrations/user/:provider", userIntegrationsHandler.Delete)
+	settingsGroup.Get("/integrations/apps", userIntegrationsHandler.AppInstallURLs)
 
 	// Admin base
 	admin := protected.Group("/admin")
+	admin.Get("/teams", teamHandler.ListAll)
+	admin.Get("/teams/:id", teamHandler.AdminShowTeam)
+	admin.Patch("/teams/:id", teamHandler.AdminUpdateTeam)
+	admin.Delete("/teams/:id", teamHandler.AdminDeleteTeam)
+	admin.Post("/teams/:id/members", teamHandler.AdminAddMember)
+	admin.Delete("/teams/:id/members/:user_id", teamHandler.AdminRemoveMember)
+	admin.Patch("/teams/:id/members/:user_id", teamHandler.AdminUpdateMemberRole)
 	admin.Get("/users", adminHandler.ListUsers)
 	admin.Patch("/users/:id/role", adminHandler.UpdateUserRole)
 	admin.Patch("/users/:id/suspend", adminHandler.SuspendUser)
@@ -259,6 +296,8 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	admin.Get("/users/:id/sessions", adminCmsHandler.UserSessions)
 	admin.Get("/users/:id/teams", adminCmsHandler.UserTeams)
 	admin.Get("/users/:id/issues", adminCmsHandler.UserIssues)
+	admin.Get("/users/:id/memberships", teamHandler.AdminUserTeams)
+	admin.Delete("/users/:id/memberships/:team_id", teamHandler.AdminRemoveUserFromTeam)
 	admin.Get("/users/:id/otp", adminCmsHandler.GetLastOTP)
 	admin.Post("/users/:id/password", adminCmsHandler.ForceResetPassword)
 	admin.Post("/users/:id/impersonate", adminCmsHandler.Impersonate)
@@ -286,8 +325,27 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	admin.Post("/notifications/seed", adminCmsHandler.SeedNotifications)
 	admin.Get("/notifications", adminCmsHandler.ListNotificationsSent)
 
+	// Admin sponsors
+	admin.Get("/sponsors", adminCmsHandler.ListSponsors)
+	admin.Post("/sponsors", adminCmsHandler.CreateSponsor)
+	admin.Put("/sponsors/:id", adminCmsHandler.UpdateSponsor)
+	admin.Delete("/sponsors/:id", adminCmsHandler.DeleteSponsor)
+
+	// Admin community posts
+	admin.Get("/community/posts", adminCmsHandler.ListCommunityPosts)
+	admin.Patch("/community/posts/:id", adminCmsHandler.UpdateCommunityPost)
+	admin.Delete("/community/posts/:id", adminCmsHandler.DeleteCommunityPost)
+
+	// Admin GitHub issues
+	admin.Get("/github/repos", adminCmsHandler.ListGitHubRepos)
+	admin.Get("/github/issues", adminCmsHandler.ListGitHubIssues)
+	admin.Post("/github/sync", adminCmsHandler.SyncGitHubIssues)
+
 	// Admin system settings
 	admin.Get("/settings/:key", adminSettingsHandler.GetSetting)
 	admin.Patch("/settings/:key", adminSettingsHandler.UpdateSetting)
+	admin.Post("/settings/seed", adminSettingsHandler.SeedSettings)
+	admin.Post("/settings/test-email", adminSettingsHandler.TestEmail)
+	admin.Post("/settings/generate-sitemap", adminSettingsHandler.GenerateSitemap)
 }
 

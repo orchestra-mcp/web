@@ -10,6 +10,9 @@ import (
 // User represents a registered user of the platform.
 type User struct {
 	ID                    uint           `gorm:"primarykey" json:"id"`
+	CreatedAt             time.Time      `json:"created_at"`
+	UpdatedAt             time.Time      `json:"updated_at"`
+	DeletedAt             gorm.DeletedAt `gorm:"index" json:"deleted_at"`
 	Name                  string         `json:"name"`
 	Email                 string         `gorm:"uniqueIndex" json:"email"`
 	Password              string         `json:"-"`
@@ -21,5 +24,4 @@ type User struct {
 	OnboardingCompletedAt *time.Time     `json:"onboarding_completed_at"`
 	Settings              datatypes.JSON `json:"settings"`
 	RememberToken         string         `json:"-"`
-	gorm.Model
 }

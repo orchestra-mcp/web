@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -142,6 +143,9 @@ func (h *TunnelHandler) Register(c fiber.Ctx) error {
 	}
 
 	name := body.Name
+	if name == "" && tokenInfo.Workspace != "" {
+		name = filepath.Base(tokenInfo.Workspace)
+	}
 	if name == "" {
 		name = tokenInfo.Hostname
 	}

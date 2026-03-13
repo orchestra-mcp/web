@@ -438,3 +438,281 @@ func (h *TeamHandler) UploadTeamAvatar(c fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"ok": true, "avatar_url": avatarURL})
 }
+
+// ListAll handles GET /api/admin/teams — returns ALL teams system-wide (admin only).
+func (h *TeamHandler) ListAll(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+	if user.Role != "admin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin only"})
+	}
+
+	var teams []models.Team
+	if err := h.db.Order("created_at DESC").Find(&teams).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to fetch teams"})
+	}
+
+	result := make([]fiber.Map, 0, len(teams))
+	for _, t := range teams {
+		var memberCount int64
+		h.db.Model(&models.Membership{}).Where("team_id = ?", t.ID).Count(&memberCount)
+
+		// Get owner info
+		var owner models.Membership
+		var ownerName string
+		if err := h.db.Where("team_id = ? AND role = ?", t.ID, "owner").
+			Preload("User").First(&owner).Error; err == nil && owner.User.ID != 0 {
+			ownerName = owner.User.Name
+		}
+
+		result = append(result, fiber.Map{
+			"id":           t.ID,
+			"name":         t.Name,
+			"slug":         t.Slug,
+			"plan":         t.Plan,
+			"avatar_url":   t.AvatarURL,
+			"member_count": memberCount,
+			"owner_name":   ownerName,
+			"created_at":   t.CreatedAt,
+		})
+	}
+
+	return c.JSON(fiber.Map{"teams": result})
+}
+
+// AdminShowTeam handles GET /api/admin/teams/:id — returns a single team with members (admin only).
+func (h *TeamHandler) AdminShowTeam(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil || user.Role != "admin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin only"})
+	}
+
+	teamID := c.Params("id")
+	var team models.Team
+	if err := h.db.First(&team, "id = ?", teamID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "team not found"})
+	}
+
+	var memberCount int64
+	h.db.Model(&models.Membership{}).Where("team_id = ?", teamID).Count(&memberCount)
+
+	var memberships []models.Membership
+	h.db.Where("team_id = ?", teamID).Preload("User").Find(&memberships)
+
+	members := make([]fiber.Map, 0, len(memberships))
+	for _, m := range memberships {
+		members = append(members, fiber.Map{
+			"id":         m.ID,
+			"user_id":    m.UserID,
+			"name":       m.User.Name,
+			"email":      m.User.Email,
+			"avatar_url": m.User.AvatarURL,
+			"role":       m.Role,
+			"joined_at":  m.CreatedAt,
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"team":         team,
+		"members":      members,
+		"member_count": memberCount,
+	})
+}
+
+// AdminUpdateTeam handles PATCH /api/admin/teams/:id — update team details (admin only).
+func (h *TeamHandler) AdminUpdateTeam(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil || user.Role != "admin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin only"})
+	}
+
+	teamID := c.Params("id")
+	var team models.Team
+	if err := h.db.First(&team, "id = ?", teamID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "team not found"})
+	}
+
+	var body struct {
+		Name string `json:"name"`
+		Plan string `json:"plan"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
+	}
+
+	updates := map[string]interface{}{}
+	if body.Name != "" {
+		updates["name"] = body.Name
+	}
+	if body.Plan != "" {
+		updates["plan"] = body.Plan
+	}
+	if len(updates) > 0 {
+		h.db.Model(&team).Updates(updates)
+	}
+
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// AdminRemoveMember handles DELETE /api/admin/teams/:id/members/:user_id (admin only).
+func (h *TeamHandler) AdminRemoveMember(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil || user.Role != "admin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin only"})
+	}
+
+	teamID := c.Params("id")
+	userID := c.Params("user_id")
+
+	if err := h.db.Where("team_id = ? AND user_id = ?", teamID, userID).Delete(&models.Membership{}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to remove member"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// AdminUpdateMemberRole handles PATCH /api/admin/teams/:id/members/:user_id (admin only).
+func (h *TeamHandler) AdminUpdateMemberRole(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil || user.Role != "admin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin only"})
+	}
+
+	teamID := c.Params("id")
+	userID := c.Params("user_id")
+
+	var body struct {
+		Role string `json:"role"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil || body.Role == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "role is required"})
+	}
+
+	valid := map[string]bool{"owner": true, "admin": true, "member": true, "viewer": true}
+	if !valid[body.Role] {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid role"})
+	}
+
+	if err := h.db.Model(&models.Membership{}).Where("team_id = ? AND user_id = ?", teamID, userID).Update("role", body.Role).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update role"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// AdminDeleteTeam handles DELETE /api/admin/teams/:id (admin only).
+func (h *TeamHandler) AdminDeleteTeam(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil || user.Role != "admin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin only"})
+	}
+
+	teamID := c.Params("id")
+	h.db.Where("team_id = ?", teamID).Delete(&models.Membership{})
+	if err := h.db.Where("id = ?", teamID).Delete(&models.Team{}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to delete team"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// AdminAddMember handles POST /api/admin/teams/:id/members — admin adds a user to a team.
+func (h *TeamHandler) AdminAddMember(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil || user.Role != "admin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin only"})
+	}
+
+	teamID := c.Params("id")
+	var body struct {
+		UserID uint   `json:"user_id"`
+		Role   string `json:"role"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil || body.UserID == 0 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user_id is required"})
+	}
+	if body.Role == "" {
+		body.Role = "member"
+	}
+
+	// Check team exists
+	var team models.Team
+	if err := h.db.Where("id = ?", teamID).First(&team).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "team not found"})
+	}
+
+	// Check user exists
+	var target models.User
+	if err := h.db.First(&target, body.UserID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
+	}
+
+	// Check not already a member
+	var existing models.Membership
+	if err := h.db.Where("team_id = ? AND user_id = ?", teamID, body.UserID).First(&existing).Error; err == nil {
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "user is already a member of this team"})
+	}
+
+	m := models.Membership{
+		UserID: body.UserID,
+		TeamID: teamID,
+		Role:   body.Role,
+	}
+	if err := h.db.Create(&m).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to add member"})
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"ok": true})
+}
+
+// AdminUserTeams handles GET /api/admin/users/:id/memberships — list teams for a user with membership details.
+func (h *TeamHandler) AdminUserTeams(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil || user.Role != "admin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin only"})
+	}
+
+	userID := c.Params("id")
+	var memberships []models.Membership
+	h.db.Where("user_id = ?", userID).Preload("Team").Find(&memberships)
+
+	type row struct {
+		MembershipID string `json:"membership_id"`
+		TeamID       string `json:"team_id"`
+		TeamName     string `json:"team_name"`
+		TeamPlan     string `json:"team_plan"`
+		Role         string `json:"role"`
+	}
+	rows := make([]row, 0, len(memberships))
+	for _, m := range memberships {
+		rows = append(rows, row{
+			MembershipID: m.ID,
+			TeamID:       m.TeamID,
+			TeamName:     m.Team.Name,
+			TeamPlan:     m.Team.Plan,
+			Role:         m.Role,
+		})
+	}
+
+	return c.JSON(fiber.Map{"memberships": rows})
+}
+
+// AdminRemoveUserFromTeam handles DELETE /api/admin/users/:id/memberships/:team_id
+func (h *TeamHandler) AdminRemoveUserFromTeam(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil || user.Role != "admin" {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin only"})
+	}
+
+	userID := c.Params("id")
+	teamID := c.Params("team_id")
+
+	result := h.db.Where("user_id = ? AND team_id = ?", userID, teamID).Delete(&models.Membership{})
+	if result.RowsAffected == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "membership not found"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true})
+}

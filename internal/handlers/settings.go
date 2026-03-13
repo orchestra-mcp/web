@@ -35,31 +35,50 @@ func (h *SettingsHandler) UpdateProfile(c fiber.Ctx) error {
 	}
 
 	var body struct {
-		Name     string `json:"name"`
-		Email    string `json:"email"`
-		Phone    string `json:"phone"`
-		Position string `json:"position"`
-		Timezone string `json:"timezone"`
-		Bio      string `json:"bio"`
+		Name                 string        `json:"name"`
+		Email                string        `json:"email"`
+		Phone                string        `json:"phone"`
+		Gender               string        `json:"gender"`
+		Position             string        `json:"position"`
+		Timezone             string        `json:"timezone"`
+		Bio                  string        `json:"bio"`
+		PublicProfileEnabled *bool         `json:"public_profile_enabled,omitempty"`
+		Handle               *string       `json:"handle,omitempty"`
+		CoverURL             *string       `json:"cover_url,omitempty"`
+		SocialLinks          interface{}   `json:"social_links,omitempty"`
 	}
 	if err := json.Unmarshal(c.Body(), &body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
 	}
 
-	// Merge into Settings JSON
-	type profileMeta struct {
-		Phone    string `json:"phone"`
-		Position string `json:"position"`
-		Timezone string `json:"timezone"`
-		Bio      string `json:"bio"`
+	// Load existing settings to preserve other keys (api_keys, preferences, etc.)
+	var settings map[string]interface{}
+	if err := json.Unmarshal(user.Settings, &settings); err != nil {
+		settings = map[string]interface{}{}
 	}
-	meta := profileMeta{
-		Phone:    body.Phone,
-		Position: body.Position,
-		Timezone: body.Timezone,
-		Bio:      body.Bio,
+
+	// Merge profile metadata into settings
+	settings["phone"] = body.Phone
+	settings["gender"] = body.Gender
+	settings["position"] = body.Position
+	settings["timezone"] = body.Timezone
+	settings["bio"] = body.Bio
+
+	// Public profile fields (only set if provided)
+	if body.PublicProfileEnabled != nil {
+		settings["public_profile_enabled"] = *body.PublicProfileEnabled
 	}
-	metaJSON, _ := json.Marshal(meta)
+	if body.Handle != nil {
+		settings["handle"] = *body.Handle
+	}
+	if body.CoverURL != nil {
+		settings["cover_url"] = *body.CoverURL
+	}
+	if body.SocialLinks != nil {
+		settings["social_links"] = body.SocialLinks
+	}
+
+	settingsJSON, _ := json.Marshal(settings)
 
 	updates := map[string]interface{}{}
 	if body.Name != "" {
@@ -72,7 +91,7 @@ func (h *SettingsHandler) UpdateProfile(c fiber.Ctx) error {
 		}
 		updates["email"] = body.Email
 	}
-	updates["settings"] = metaJSON
+	updates["settings"] = settingsJSON
 
 	if len(updates) > 0 {
 		if err := h.db.Model(user).Updates(updates).Error; err != nil {
@@ -133,6 +152,67 @@ func (h *SettingsHandler) UploadAvatar(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"ok": true, "avatar_url": avatarURL})
+}
+
+// UploadCover handles POST /api/settings/cover
+func (h *SettingsHandler) UploadCover(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	file, err := c.FormFile("cover")
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "cover file is required"})
+	}
+
+	// Validate file type
+	ext := strings.ToLower(filepath.Ext(file.Filename))
+	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".gif" && ext != ".webp" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid file type, must be jpg/png/gif/webp"})
+	}
+
+	// Validate file size (max 5MB for cover images)
+	if file.Size > 5*1024*1024 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file too large, max 5MB"})
+	}
+
+	// Ensure uploads directory exists
+	uploadDir := "uploads/covers"
+	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create upload directory"})
+	}
+
+	// Save file with unique name
+	filename := fmt.Sprintf("%d-%d%s", user.ID, time.Now().Unix(), ext)
+	savePath := filepath.Join(uploadDir, filename)
+	if err := c.SaveFile(file, savePath); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save file"})
+	}
+
+	// Delete old cover file if it exists
+	var settings map[string]interface{}
+	if err := json.Unmarshal(user.Settings, &settings); err == nil {
+		if oldCover, ok := settings["cover_url"].(string); ok && strings.HasPrefix(oldCover, "/uploads/covers/") {
+			_ = os.Remove(strings.TrimPrefix(oldCover, "/"))
+		}
+	} else {
+		settings = map[string]interface{}{}
+	}
+
+	// Update user settings with new cover URL
+	coverURL := "/" + savePath
+	settings["cover_url"] = coverURL
+	settingsJSON, _ := json.Marshal(settings)
+
+	if err := h.db.Model(user).Update("settings", gorm.Expr(
+		"COALESCE(settings, '{}'::jsonb) || ?::jsonb",
+		string(settingsJSON),
+	)).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update cover"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true, "cover_url": coverURL})
 }
 
 // ListSessions handles GET /api/settings/sessions
