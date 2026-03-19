@@ -26,10 +26,11 @@ import (
 var oauthStateStore sync.Map
 
 type oauthState struct {
-	Provider  string
-	Mode      string // "login" or "connect" (connect = link to existing user)
-	UserID    uint   // only set when mode=connect
-	ExpiresAt time.Time
+	Provider    string
+	Mode        string // "login" or "connect" (connect = link to existing user)
+	UserID      uint   // only set when mode=connect
+	ExpiresAt   time.Time
+	AppRedirect string // custom redirect URI for mobile apps (e.g. orchestra://auth/callback)
 }
 
 // OAuthHandler handles OAuth2 login/connect flows.
@@ -175,11 +176,18 @@ func (h *OAuthHandler) Redirect(c fiber.Ctx) error {
 		userID = user.ID
 	}
 
+	// Accept custom redirect for mobile app deep links (only allow orchestra:// scheme).
+	appRedirect := c.Query("redirect")
+	if appRedirect != "" && !strings.HasPrefix(appRedirect, "orchestra://") {
+		appRedirect = ""
+	}
+
 	oauthStateStore.Store(state, &oauthState{
-		Provider:  provider,
-		Mode:      mode,
-		UserID:    userID,
-		ExpiresAt: time.Now().Add(10 * time.Minute),
+		Provider:    provider,
+		Mode:        mode,
+		UserID:      userID,
+		ExpiresAt:   time.Now().Add(10 * time.Minute),
+		AppRedirect: appRedirect,
 	})
 
 	redirectURI := h.redirectURI(c, provider)
@@ -260,7 +268,7 @@ func (h *OAuthHandler) Callback(c fiber.Ctx) error {
 		// Link to existing user
 		return h.handleConnect(c, st.UserID, provider, userInfo, tokenResp, avatar)
 	}
-	return h.handleLogin(c, provider, userInfo, tokenResp, avatar)
+	return h.handleLogin(c, provider, userInfo, tokenResp, avatar, st.AppRedirect)
 }
 
 type tokenResponse struct {
@@ -369,7 +377,15 @@ func (h *OAuthHandler) fetchUserInfo(pcfg *providerConfig, accessToken string) (
 	return &info, nil
 }
 
-func (h *OAuthHandler) handleLogin(c fiber.Ctx, provider string, info *userInfoResponse, token *tokenResponse, avatar string) error {
+func (h *OAuthHandler) handleLogin(c fiber.Ctx, provider string, info *userInfoResponse, token *tokenResponse, avatar string, appRedirect string) error {
+	// Helper: build the success redirect URL (uses app deep link if set).
+	successRedirect := func(jwt string) string {
+		if appRedirect != "" {
+			return appRedirect + "?token=" + jwt
+		}
+		return "/auth/oauth-callback?token=" + jwt
+	}
+
 	// Check if OAuth account already exists
 	var existing models.OAuthAccount
 	if err := h.db.Where("provider = ? AND provider_user_id = ?", provider, info.ID).First(&existing).Error; err == nil {
@@ -392,7 +408,7 @@ func (h *OAuthHandler) handleLogin(c fiber.Ctx, provider string, info *userInfoR
 		if err != nil {
 			return c.Redirect().To("/login?error=token_generation_failed")
 		}
-		return c.Redirect().To("/auth/oauth-callback?token=" + jwtToken)
+		return c.Redirect().To(successRedirect(jwtToken))
 	}
 
 	// No existing OAuth account — check if a user with that email exists
@@ -405,7 +421,7 @@ func (h *OAuthHandler) handleLogin(c fiber.Ctx, provider string, info *userInfoR
 			if err != nil {
 				return c.Redirect().To("/login?error=token_generation_failed")
 			}
-			return c.Redirect().To("/auth/oauth-callback?token=" + jwtToken)
+			return c.Redirect().To(successRedirect(jwtToken))
 		}
 	}
 
@@ -436,7 +452,7 @@ func (h *OAuthHandler) handleLogin(c fiber.Ctx, provider string, info *userInfoR
 	if err != nil {
 		return c.Redirect().To("/login?error=token_generation_failed")
 	}
-	return c.Redirect().To("/auth/oauth-callback?token=" + jwtToken)
+	return c.Redirect().To(successRedirect(jwtToken))
 }
 
 func (h *OAuthHandler) handleConnect(c fiber.Ctx, userID uint, provider string, info *userInfoResponse, token *tokenResponse, avatar string) error {
