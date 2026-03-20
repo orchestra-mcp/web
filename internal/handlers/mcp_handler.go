@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"time"
 
@@ -202,4 +205,110 @@ func (h *MCPHandler) PatchPermissions(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"ok": true})
+}
+
+// GetMCPToken handles GET /api/settings/mcp-token
+// Returns the user's dedicated MCP API token (creates one if missing).
+func (h *MCPHandler) GetMCPToken(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	token, err := h.getOrCreateMCPToken(user)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load token"})
+	}
+	return c.JSON(fiber.Map{"token": token})
+}
+
+// RegenerateMCPToken handles POST /api/settings/mcp-token/regenerate
+// Replaces the user's MCP API token with a new one.
+func (h *MCPHandler) RegenerateMCPToken(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	token, err := h.rotateMCPToken(user)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to regenerate token"})
+	}
+	return c.JSON(fiber.Map{"token": token})
+}
+
+// getOrCreateMCPToken returns the existing mcp_token from settings, or creates one.
+func (h *MCPHandler) getOrCreateMCPToken(user *models.User) (string, error) {
+	var meta map[string]interface{}
+	if len(user.Settings) > 0 {
+		json.Unmarshal(user.Settings, &meta)
+	}
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+	if t, ok := meta["mcp_token"].(string); ok && t != "" {
+		return t, nil
+	}
+	return h.rotateMCPToken(user)
+}
+
+// rotateMCPToken generates a new orch_* token, stores its hash, and returns the raw token.
+func (h *MCPHandler) rotateMCPToken(user *models.User) (string, error) {
+	raw := make([]byte, 24)
+	if _, err := rand.Read(raw); err != nil {
+		return "", err
+	}
+	token := "orch_" + hex.EncodeToString(raw)
+	sum := sha256.Sum256([]byte(token))
+	hashHex := hex.EncodeToString(sum[:])
+
+	var meta map[string]interface{}
+	if len(user.Settings) > 0 {
+		json.Unmarshal(user.Settings, &meta)
+	}
+	if meta == nil {
+		meta = map[string]interface{}{}
+	}
+
+	// Remove old mcp key from api_keys list.
+	oldHash, _ := meta["mcp_token_hash"].(string)
+	if raw2, ok := meta["api_keys"]; ok {
+		b, _ := json.Marshal(raw2)
+		var keys []map[string]interface{}
+		if json.Unmarshal(b, &keys) == nil {
+			filtered := make([]map[string]interface{}, 0, len(keys))
+			for _, k := range keys {
+				if k["hash"] != oldHash {
+					filtered = append(filtered, k)
+				}
+			}
+			meta["api_keys"] = filtered
+		}
+	}
+
+	// Store new key.
+	meta["mcp_token"] = token
+	meta["mcp_token_hash"] = hashHex
+
+	// Append to api_keys so ValidateToken can find it.
+	var keys []map[string]interface{}
+	if raw2, ok := meta["api_keys"]; ok {
+		b, _ := json.Marshal(raw2)
+		json.Unmarshal(b, &keys)
+	}
+	keys = append(keys, map[string]interface{}{
+		"id":   "mcp",
+		"name": "MCP Access",
+		"hash": hashHex,
+	})
+	meta["api_keys"] = keys
+
+	b, err := json.Marshal(meta)
+	if err != nil {
+		return "", err
+	}
+	if err := h.db.Model(user).Update("settings", string(b)).Error; err != nil {
+		return "", err
+	}
+	return token, nil
 }

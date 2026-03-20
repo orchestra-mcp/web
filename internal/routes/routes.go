@@ -585,6 +585,8 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	settingsGroup.Patch("/preferences", settingsHandler.UpdatePreferences)
 	settingsGroup.Get("/mcp-permissions", mcpHandler.GetPermissions)
 	settingsGroup.Patch("/mcp-permissions", mcpHandler.PatchPermissions)
+	settingsGroup.Get("/mcp-token", mcpHandler.GetMCPToken)
+	settingsGroup.Post("/mcp-token/regenerate", mcpHandler.RegenerateMCPToken)
 	settingsGroup.Get("/integrations/user", userIntegrationsHandler.List)
 	settingsGroup.Put("/integrations/user/:provider", userIntegrationsHandler.Upsert)
 	settingsGroup.Delete("/integrations/user/:provider", userIntegrationsHandler.Delete)
