@@ -259,6 +259,9 @@ func (h *AdminCmsHandler) NotifyUser(c fiber.Ctx) error {
 		})
 	}
 
+	// Send Web Push notification
+	services.SendPush(h.db, user.ID, body.Title, body.Message, notifType)
+
 	return c.JSON(fiber.Map{"ok": true})
 }
 
@@ -696,6 +699,9 @@ func (h *AdminCmsHandler) SendNotification(c fiber.Ctx) error {
 				NType:      notif.Type,
 			})
 		}
+
+		// Send Web Push notification
+		services.SendPush(h.db, uid, body.Title, body.Message, notifType)
 	}
 
 	return c.JSON(fiber.Map{"ok": true, "sent_to": len(targetIDs)})
@@ -760,7 +766,7 @@ func (h *AdminCmsHandler) ListSponsors(c fiber.Ctx) error {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "admin access required"})
 	}
 	var sponsors []models.Sponsor
-	h.db.Order("`order` ASC, created_at DESC").Find(&sponsors)
+	h.db.Order(`"order" ASC, created_at DESC`).Find(&sponsors)
 	return c.JSON(fiber.Map{"sponsors": sponsors})
 }
 
@@ -974,6 +980,22 @@ func (h *AdminCmsHandler) SyncGitHubIssues(c fiber.Ctx) error {
 	// Placeholder — actual GitHub API sync would go here.
 	// For now return success so the frontend doesn't error.
 	return c.JSON(fiber.Map{"ok": true, "message": "GitHub sync not yet configured. Add a GitHub token in admin settings."})
+}
+
+// ── Public endpoints (no admin check) ──────────────────────────────────────
+
+// PublicSponsors handles GET /api/public/sponsors
+func (h *AdminCmsHandler) PublicSponsors(c fiber.Ctx) error {
+	var sponsors []models.Sponsor
+	h.db.Where("status = ?", "active").Order("`order` ASC, created_at DESC").Find(&sponsors)
+	return c.JSON(fiber.Map{"sponsors": sponsors})
+}
+
+// PublicIssues handles GET /api/public/issues
+func (h *AdminCmsHandler) PublicIssues(c fiber.Ctx) error {
+	var issues []models.GitHubIssue
+	h.db.Order("created_at DESC").Limit(100).Find(&issues)
+	return c.JSON(fiber.Map{"issues": issues})
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────

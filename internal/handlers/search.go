@@ -330,13 +330,41 @@ func (h *SearchHandler) PublicSearch(c fiber.Ctx) error {
 		Limit(limit).
 		Find(&users)
 	for _, u := range users {
+		handle := settingsHandle(u)
+		if handle == "" {
+			handle = fmt.Sprintf("%d", u.ID)
+		}
 		results = append(results, searchResultItem{
 			ID:          fmt.Sprintf("user-%d", u.ID),
 			Type:        "profile",
 			Title:       u.Name,
 			Description: u.Email,
-			URL:         fmt.Sprintf("/profile/%d", u.ID),
+			URL:         fmt.Sprintf("/@%s", handle),
 			Category:    "profile",
+		})
+	}
+
+	// Public shared content (notes, skills, agents, workflows)
+	var shares []models.SharedContent
+	h.db.Where("visibility = 'public' AND (LOWER(title) LIKE ? OR LOWER(description) LIKE ?)", pattern, pattern).
+		Order("created_at desc").
+		Limit(limit).
+		Find(&shares)
+	for _, s := range shares {
+		var owner models.User
+		h.db.Select("settings").Where("id = ?", s.UserID).First(&owner)
+		handle := settingsHandle(owner)
+		desc := s.Description
+		if len(desc) > 120 {
+			desc = desc[:120] + "..."
+		}
+		results = append(results, searchResultItem{
+			ID:          fmt.Sprintf("share-%d", s.ID),
+			Type:        s.EntityType,
+			Title:       s.Title,
+			Description: desc,
+			URL:         fmt.Sprintf("/@%s/%s/%s", handle, s.EntityType, s.Slug),
+			Category:    s.EntityType,
 		})
 	}
 

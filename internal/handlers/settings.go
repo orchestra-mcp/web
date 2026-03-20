@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/orchestra-mcp/web/internal/config"
 	"github.com/orchestra-mcp/web/internal/middleware"
 	"github.com/orchestra-mcp/web/internal/models"
 	"gorm.io/gorm"
@@ -19,12 +20,17 @@ import (
 
 // SettingsHandler handles user settings endpoints.
 type SettingsHandler struct {
-	db *gorm.DB
+	db  *gorm.DB
+	cfg *config.Config
 }
 
 // NewSettingsHandler creates a new SettingsHandler.
-func NewSettingsHandler(db *gorm.DB) *SettingsHandler {
-	return &SettingsHandler{db: db}
+func NewSettingsHandler(db *gorm.DB, cfg ...*config.Config) *SettingsHandler {
+	h := &SettingsHandler{db: db}
+	if len(cfg) > 0 && cfg[0] != nil {
+		h.cfg = cfg[0]
+	}
+	return h
 }
 
 // UpdateProfile handles PATCH /api/settings/profile (extended)
@@ -46,6 +52,13 @@ func (h *SettingsHandler) UpdateProfile(c fiber.Ctx) error {
 		Handle               *string       `json:"handle,omitempty"`
 		CoverURL             *string       `json:"cover_url,omitempty"`
 		SocialLinks          interface{}   `json:"social_links,omitempty"`
+		Sponsors             interface{}   `json:"sponsors,omitempty"`
+		ShowBadges           *bool         `json:"show_badges,omitempty"`
+		ShowWallet           *bool         `json:"show_wallet,omitempty"`
+		ShowTeams            *bool         `json:"show_teams,omitempty"`
+		ShowSponsors         *bool         `json:"show_sponsors,omitempty"`
+		ShowCommentsOnProfile *bool        `json:"show_comments_on_profile,omitempty"`
+		Appearance            interface{}  `json:"appearance,omitempty"`
 	}
 	if err := json.Unmarshal(c.Body(), &body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
@@ -68,7 +81,7 @@ func (h *SettingsHandler) UpdateProfile(c fiber.Ctx) error {
 	if body.PublicProfileEnabled != nil {
 		settings["public_profile_enabled"] = *body.PublicProfileEnabled
 	}
-	if body.Handle != nil {
+	if body.Handle != nil && *body.Handle != "" {
 		settings["handle"] = *body.Handle
 	}
 	if body.CoverURL != nil {
@@ -76,6 +89,27 @@ func (h *SettingsHandler) UpdateProfile(c fiber.Ctx) error {
 	}
 	if body.SocialLinks != nil {
 		settings["social_links"] = body.SocialLinks
+	}
+	if body.Sponsors != nil {
+		settings["sponsors"] = body.Sponsors
+	}
+	if body.ShowBadges != nil {
+		settings["show_badges"] = *body.ShowBadges
+	}
+	if body.ShowWallet != nil {
+		settings["show_wallet"] = *body.ShowWallet
+	}
+	if body.ShowTeams != nil {
+		settings["show_teams"] = *body.ShowTeams
+	}
+	if body.ShowSponsors != nil {
+		settings["show_sponsors"] = *body.ShowSponsors
+	}
+	if body.ShowCommentsOnProfile != nil {
+		settings["show_comments_on_profile"] = *body.ShowCommentsOnProfile
+	}
+	if body.Appearance != nil {
+		settings["appearance"] = body.Appearance
 	}
 
 	settingsJSON, _ := json.Marshal(settings)
@@ -103,6 +137,14 @@ func (h *SettingsHandler) UpdateProfile(c fiber.Ctx) error {
 	return c.JSON(user)
 }
 
+// uploadDir returns the base upload directory (absolute path from config, or relative fallback).
+func (h *SettingsHandler) uploadDir() string {
+	if h.cfg != nil && h.cfg.UploadDir != "" {
+		return h.cfg.UploadDir
+	}
+	return "uploads"
+}
+
 // UploadAvatar handles POST /api/settings/avatar
 func (h *SettingsHandler) UploadAvatar(c fiber.Ctx) error {
 	user := middleware.CurrentUser(c)
@@ -126,27 +168,27 @@ func (h *SettingsHandler) UploadAvatar(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file too large, max 2MB"})
 	}
 
-	// Ensure uploads directory exists
-	uploadDir := "uploads/avatars"
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+	// Ensure uploads directory exists (use absolute path from config).
+	avatarDir := filepath.Join(h.uploadDir(), "avatars")
+	if err := os.MkdirAll(avatarDir, 0755); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create upload directory"})
 	}
 
 	// Save file with unique name
 	filename := fmt.Sprintf("%d-%d%s", user.ID, time.Now().Unix(), ext)
-	savePath := filepath.Join(uploadDir, filename)
+	savePath := filepath.Join(avatarDir, filename)
 	if err := c.SaveFile(file, savePath); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save file"})
 	}
 
 	// Delete old avatar file if it exists
 	if user.AvatarURL != "" && strings.HasPrefix(user.AvatarURL, "/uploads/avatars/") {
-		oldPath := strings.TrimPrefix(user.AvatarURL, "/")
-		_ = os.Remove(oldPath)
+		oldFilename := strings.TrimPrefix(user.AvatarURL, "/uploads/avatars/")
+		_ = os.Remove(filepath.Join(avatarDir, oldFilename))
 	}
 
-	// Update user record
-	avatarURL := "/" + savePath
+	// Update user record — URL path is always relative for the client.
+	avatarURL := "/uploads/avatars/" + filename
 	if err := h.db.Model(user).Update("avatar_url", avatarURL).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update avatar"})
 	}
@@ -177,15 +219,15 @@ func (h *SettingsHandler) UploadCover(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file too large, max 5MB"})
 	}
 
-	// Ensure uploads directory exists
-	uploadDir := "uploads/covers"
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+	// Ensure uploads directory exists (use absolute path from config).
+	coverDir := filepath.Join(h.uploadDir(), "covers")
+	if err := os.MkdirAll(coverDir, 0755); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create upload directory"})
 	}
 
 	// Save file with unique name
 	filename := fmt.Sprintf("%d-%d%s", user.ID, time.Now().Unix(), ext)
-	savePath := filepath.Join(uploadDir, filename)
+	savePath := filepath.Join(coverDir, filename)
 	if err := c.SaveFile(file, savePath); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save file"})
 	}
@@ -194,14 +236,15 @@ func (h *SettingsHandler) UploadCover(c fiber.Ctx) error {
 	var settings map[string]interface{}
 	if err := json.Unmarshal(user.Settings, &settings); err == nil {
 		if oldCover, ok := settings["cover_url"].(string); ok && strings.HasPrefix(oldCover, "/uploads/covers/") {
-			_ = os.Remove(strings.TrimPrefix(oldCover, "/"))
+			oldFilename := strings.TrimPrefix(oldCover, "/uploads/covers/")
+			_ = os.Remove(filepath.Join(coverDir, oldFilename))
 		}
 	} else {
 		settings = map[string]interface{}{}
 	}
 
-	// Update user settings with new cover URL
-	coverURL := "/" + savePath
+	// Update user settings with new cover URL — URL path is always relative for the client.
+	coverURL := "/uploads/covers/" + filename
 	settings["cover_url"] = coverURL
 	settingsJSON, _ := json.Marshal(settings)
 
@@ -222,18 +265,100 @@ func (h *SettingsHandler) ListSessions(c fiber.Ctx) error {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 	}
 
-	// Return a synthetic "current session" based on the request
+	ua := string(c.Request().Header.UserAgent())
+	device, os, browser := parseUserAgent(ua)
+
+	// Current session
 	sessions := []fiber.Map{
 		{
-			"id":         "current",
-			"device":     "Web Browser",
-			"ip":         c.IP(),
-			"user_agent": string(c.Request().Header.UserAgent()),
-			"last_seen":  time.Now().Format(time.RFC3339),
-			"is_current": true,
+			"id":          "current",
+			"device":      device,
+			"os":          os,
+			"browser":     browser,
+			"device_type": classifyDevice(ua),
+			"ip":          c.IP(),
+			"user_agent":  ua,
+			"last_seen":   time.Now().Format(time.RFC3339),
+			"is_current":  true,
 		},
 	}
+
+	// Include registered device tokens as sessions
+	var devices []models.DeviceToken
+	h.db.Where("user_id = ?", user.ID).Order("last_seen_at DESC").Find(&devices)
+	for _, d := range devices {
+		lastSeen := ""
+		if d.LastSeenAt != nil {
+			lastSeen = d.LastSeenAt.Format(time.RFC3339)
+		}
+		sess := fiber.Map{
+			"id":          fmt.Sprintf("device:%s", d.ID),
+			"device":      d.Name,
+			"device_type": d.Platform,
+			"ip":          "",
+			"last_seen":   lastSeen,
+			"is_current":  false,
+		}
+		// Cross-reference with active tunnels
+		var tunnel models.Tunnel
+		if err := h.db.Where("user_id = ? AND status = ?", user.ID, "online").First(&tunnel).Error; err == nil {
+			sess["tunnel_active"] = true
+		}
+		sessions = append(sessions, sess)
+	}
+
 	return c.JSON(fiber.Map{"sessions": sessions})
+}
+
+// parseUserAgent extracts device name, OS, and browser from a user-agent string.
+func parseUserAgent(ua string) (device, os, browser string) {
+	lower := strings.ToLower(ua)
+	// OS detection
+	switch {
+	case strings.Contains(lower, "iphone"):
+		os, device = "iOS", "iPhone"
+	case strings.Contains(lower, "ipad"):
+		os, device = "iPadOS", "iPad"
+	case strings.Contains(lower, "mac os") || strings.Contains(lower, "macos"):
+		os, device = "macOS", "Mac"
+	case strings.Contains(lower, "android"):
+		os, device = "Android", "Android Device"
+	case strings.Contains(lower, "windows"):
+		os, device = "Windows", "PC"
+	case strings.Contains(lower, "linux"):
+		os, device = "Linux", "Linux PC"
+	default:
+		os, device = "Unknown", "Unknown Device"
+	}
+	// Browser detection
+	switch {
+	case strings.Contains(lower, "edg/"):
+		browser = "Edge"
+	case strings.Contains(lower, "chrome") && !strings.Contains(lower, "edg/"):
+		browser = "Chrome"
+	case strings.Contains(lower, "firefox"):
+		browser = "Firefox"
+	case strings.Contains(lower, "safari") && !strings.Contains(lower, "chrome"):
+		browser = "Safari"
+	case strings.Contains(lower, "orchestra"):
+		browser = "Orchestra App"
+	default:
+		browser = "Unknown"
+	}
+	return
+}
+
+// classifyDevice returns the device type from a user-agent string.
+func classifyDevice(ua string) string {
+	lower := strings.ToLower(ua)
+	switch {
+	case strings.Contains(lower, "iphone") || strings.Contains(lower, "android") && strings.Contains(lower, "mobile"):
+		return "mobile"
+	case strings.Contains(lower, "ipad") || strings.Contains(lower, "tablet"):
+		return "tablet"
+	default:
+		return "desktop"
+	}
 }
 
 // RevokeSession handles DELETE /api/settings/sessions/:id
@@ -242,6 +367,20 @@ func (h *SettingsHandler) RevokeSession(c fiber.Ctx) error {
 	if user == nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
 	}
+
+	sessionID := c.Params("id")
+	if sessionID == "current" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "cannot revoke current session"})
+	}
+
+	// Handle device token sessions (format: "device:123")
+	if strings.HasPrefix(sessionID, "device:") {
+		idStr := strings.TrimPrefix(sessionID, "device:")
+		if err := h.db.Where("id = ? AND user_id = ?", idStr, user.ID).Delete(&models.DeviceToken{}).Error; err != nil {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "session not found"})
+		}
+	}
+
 	return c.JSON(fiber.Map{"ok": true})
 }
 
@@ -504,4 +643,173 @@ func (h *SettingsHandler) MarkNotificationRead(c fiber.Ctx) error {
 	now := time.Now()
 	h.db.Model(&models.Notification{}).Where("id = ? AND user_id = ?", id, user.ID).Update("read_at", &now)
 	return c.JSON(fiber.Map{"ok": true})
+}
+
+// CreateIssue handles POST /api/issues
+func (h *SettingsHandler) CreateIssue(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var body struct {
+		Title       string `json:"title"`
+		Description string `json:"description"`
+		Priority    string `json:"priority"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if body.Title == "" || body.Description == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "title and description are required"})
+	}
+
+	priority := body.Priority
+	if priority == "" {
+		priority = "medium"
+	}
+
+	issue := models.Issue{
+		UserID:      user.ID,
+		Title:       body.Title,
+		Description: body.Description,
+		Priority:    priority,
+		Status:      "open",
+	}
+	if err := h.db.Create(&issue).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create issue"})
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(issue)
+}
+
+// ListMyIssues handles GET /api/issues
+func (h *SettingsHandler) ListMyIssues(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var issues []models.Issue
+	h.db.Where("user_id = ?", user.ID).Order("created_at DESC").Find(&issues)
+
+	return c.JSON(fiber.Map{"issues": issues})
+}
+
+// DeleteNotification handles DELETE /api/notifications/:id
+func (h *SettingsHandler) DeleteNotification(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	id := c.Params("id")
+	if err := h.db.Where("id = ? AND user_id = ?", id, user.ID).Delete(&models.Notification{}).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "notification not found"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// MarkAllNotificationsRead handles PATCH /api/notifications/read-all
+func (h *SettingsHandler) MarkAllNotificationsRead(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	now := time.Now()
+	h.db.Model(&models.Notification{}).
+		Where("user_id = ? AND read_at IS NULL", user.ID).
+		Update("read_at", &now)
+
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// ── Push Subscriptions ──────────────────────────────────────────────────────
+
+// RegisterPushSubscription handles POST /api/notifications/push/subscribe
+func (h *SettingsHandler) RegisterPushSubscription(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var body struct {
+		Endpoint  string `json:"endpoint"`
+		P256dh    string `json:"p256dh"`
+		Auth      string `json:"auth"`
+		Platform  string `json:"platform"`
+		UserAgent string `json:"user_agent"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+
+	if body.Endpoint == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "endpoint is required"})
+	}
+
+	platform := body.Platform
+	if platform == "" {
+		platform = "web"
+	}
+
+	// Upsert — update if endpoint already exists for this user.
+	var sub models.PushSubscription
+	result := h.db.Where("endpoint = ?", body.Endpoint).First(&sub)
+	if result.Error != nil {
+		sub = models.PushSubscription{
+			UserID:    user.ID,
+			Endpoint:  body.Endpoint,
+			P256dh:    body.P256dh,
+			Auth:      body.Auth,
+			Platform:  platform,
+			UserAgent: body.UserAgent,
+		}
+		h.db.Create(&sub)
+	} else {
+		h.db.Model(&sub).Updates(map[string]any{
+			"user_id":    user.ID,
+			"p256dh":     body.P256dh,
+			"auth":       body.Auth,
+			"platform":   platform,
+			"user_agent": body.UserAgent,
+		})
+	}
+
+	return c.JSON(fiber.Map{"ok": true, "id": sub.ID})
+}
+
+// UnregisterPushSubscription handles DELETE /api/notifications/push/unsubscribe
+func (h *SettingsHandler) UnregisterPushSubscription(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var body struct {
+		Endpoint string `json:"endpoint"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+
+	h.db.Where("user_id = ? AND endpoint = ?", user.ID, body.Endpoint).
+		Delete(&models.PushSubscription{})
+
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// ListPushSubscriptions handles GET /api/notifications/push/subscriptions
+func (h *SettingsHandler) ListPushSubscriptions(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var subs []models.PushSubscription
+	h.db.Where("user_id = ?", user.ID).Find(&subs)
+
+	return c.JSON(fiber.Map{"subscriptions": subs, "count": len(subs)})
 }

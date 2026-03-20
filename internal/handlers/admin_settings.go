@@ -47,6 +47,7 @@ var validKeys = map[string]bool{
 	"sponsors":         true,
 	"community":        true,
 	"github":           true,
+	"smart_prompts":    true,
 }
 
 // publicKeys lists settings keys readable without authentication.
@@ -70,11 +71,11 @@ func defaultSettings(key string) interface{} {
 		"general": map[string]interface{}{
 			"site_name":        "Orchestra",
 			"tagline":          "The AI-Agentic IDE",
-			"url":              "https://orchestra.dev",
-			"support_email":    "support@orchestra.dev",
+			"url":              "https://orchestra-mcp.dev",
+			"support_email":    "support@orchestra-mcp.dev",
 			"maintenance_mode": false,
-			"version":          "v1.0.0",
-			"github_url":       "https://github.com/orchestra-mcp",
+			"version":          "v1.0.4",
+			"github_url":       "https://github.com/orchestra-mcp/framework",
 			"discord_url":      "https://discord.gg/orchestra",
 		},
 		"features": map[string]interface{}{
@@ -92,7 +93,7 @@ func defaultSettings(key string) interface{} {
 		},
 		"homepage": map[string]interface{}{
 			"hero_headline": "The AI-native IDE for every platform",
-			"hero_subtext":  "Orchestra connects your AI agents to 290 tools across 36 plugins and 5 platforms — over QUIC + Protobuf with mTLS.",
+			"hero_subtext":  "290 MCP tools across 36 plugins. Single-process in-process routing. macOS, Windows, Linux, Mobile, and Extensions.",
 			"hero_cta":      "Get started free",
 			"stats": []map[string]interface{}{
 				{"label": "MCP Tools", "value": "290"},
@@ -101,14 +102,14 @@ func defaultSettings(key string) interface{} {
 				{"label": "Platforms", "value": "5"},
 			},
 			"terminal_lines": []map[string]interface{}{
-				{"name": "orchestrator", "note": "listening :9100", "color": "cyan"},
+				{"name": "orchestrator", "note": "in-process router", "color": "cyan"},
 				{"name": "storage.markdown", "note": ".projects/", "color": "cyan"},
-				{"name": "tools.features", "note": "34 tools", "color": "cyan"},
-				{"name": "engine.rag", "note": "22 tools  (Rust)", "color": "cyan"},
-				{"name": "bridge.claude", "note": "5 tools + 1 stream", "color": "purple"},
+				{"name": "tools.features", "note": "70 tools", "color": "cyan"},
+				{"name": "tools.marketplace", "note": "15 tools + 5 prompts", "color": "cyan"},
+				{"name": "engine.rag", "note": "22 tools (Rust)", "color": "purple"},
+				{"name": "bridge.claude", "note": "5 tools + streaming", "color": "purple"},
 				{"name": "agent.orchestrator", "note": "20 tools", "color": "purple"},
-				{"name": "devtools.git", "note": "20 tools", "color": "cyan"},
-				{"name": "transport.quic-bridge", "note": "port 9200", "color": "green"},
+				{"name": "transport.stdio", "note": "MCP server", "color": "green"},
 			},
 			"total_tools": "290",
 		},
@@ -118,7 +119,7 @@ func defaultSettings(key string) interface{} {
 		},
 		"contact": map[string]interface{}{
 			"headline": "Get in touch",
-			"email":    "hello@orchestra.dev",
+			"email":    "hello@orchestra-mcp.dev",
 			"hours":    "Mon–Fri, 9am–5pm PST",
 		},
 		"pricing": map[string]interface{}{
@@ -162,12 +163,12 @@ func defaultSettings(key string) interface{} {
 			},
 		},
 		"download": map[string]interface{}{
-			"version":      "1.0.0",
-			"release_date": "2026-03-02",
+			"version":      "1.0.4",
+			"release_date": "2026-03-12",
 			"install_script": "curl -fsSL https://orchestra-mcp.dev/install.sh | sh",
-			"macos":   map[string]string{"url": "", "version": "1.0.0", "release_date": "2026-03-02", "arch": "Apple Silicon + Intel"},
-			"windows": map[string]string{"url": "", "version": "1.0.0", "release_date": "2026-03-02", "arch": "x64"},
-			"linux":   map[string]string{"url": "", "version": "1.0.0", "release_date": "2026-03-02", "arch": "x64 + arm64"},
+			"macos":   map[string]string{"url": "", "version": "1.0.4", "release_date": "2026-03-12", "arch": "Apple Silicon + Intel"},
+			"windows": map[string]string{"url": "", "version": "1.0.4", "release_date": "2026-03-12", "arch": "x64"},
+			"linux":   map[string]string{"url": "", "version": "1.0.4", "release_date": "2026-03-12", "arch": "x64 + arm64"},
 		},
 		"integrations": map[string]interface{}{
 			"google_enabled":       false,
@@ -213,7 +214,7 @@ func defaultSettings(key string) interface{} {
 			"username":   "",
 			"password":   "",
 			"from_name":  "Orchestra",
-			"from_email": "noreply@orchestra.dev",
+			"from_email": "noreply@orchestra-mcp.dev",
 		},
 		"seo": map[string]interface{}{
 			"title_template":   "%s | Orchestra",
@@ -401,6 +402,58 @@ func defaultSettings(key string) interface{} {
 			"token":         "",
 			"default_repos": "orchestra-mcp/framework",
 			"sync_interval": 60,
+		},
+		"smart_prompts": map[string]interface{}{
+			"prompts": []map[string]interface{}{
+				{
+					"key":         "agent",
+					"label":       "Agent",
+					"description": "System prompt for generating Agent definitions",
+					"prompt":      "You are creating an Orchestra Agent. Output ONLY a valid JSON object with these fields:\n{\"name\": string (required), \"description\": string, \"system_prompt\": string (detailed markdown content)}\n\nRules:\n- Output ONLY the raw JSON object. No markdown code fences. No explanation.\n- All values must be strings.\n- For the markdown content field, use proper markdown formatting.",
+				},
+				{
+					"key":         "skill",
+					"label":       "Skill",
+					"description": "System prompt for generating Skill definitions",
+					"prompt":      "You are creating an Orchestra Skill. Output ONLY a valid JSON object with these fields:\n{\"name\": string (required), \"description\": string, \"body\": string (detailed markdown content)}\n\nRules:\n- Output ONLY the raw JSON object. No markdown code fences. No explanation.\n- All values must be strings.\n- For the markdown content field, use proper markdown formatting.",
+				},
+				{
+					"key":         "workflow",
+					"label":       "Workflow",
+					"description": "System prompt for generating Workflow definitions with states, transitions, and gates",
+					"prompt":      "You are creating an Orchestra Workflow definition. Output ONLY a valid JSON object with these fields:\n{\n  \"name\": string (required, workflow name),\n  \"description\": string (brief description),\n  \"initial_state\": string (the starting state key),\n  \"states\": { \"<key>\": {\"label\": string, \"terminal\": bool, \"active_work\": bool} },\n  \"transitions\": [{\"from\": \"<state_key>\", \"to\": \"<state_key>\", \"gate\": \"<gate_key or empty>\"}],\n  \"gates\": { \"<key>\": {\"label\": string, \"required_section\": string, \"skippable_for\": []} }\n}\n\nExample state keys: \"todo\", \"in-progress\", \"in-review\", \"done\".\nterminal=true means the workflow ends at that state.\nactive_work=true means active development happens in that state.\n\nRules:\n- Output ONLY the raw JSON object. No markdown code fences. No explanation.\n- states, transitions, and gates must be proper JSON (not strings).\n- Every state referenced in transitions must exist in states.\n- initial_state must be a valid state key.",
+				},
+				{
+					"key":         "doc",
+					"label":       "Document",
+					"description": "System prompt for generating Document content",
+					"prompt":      "You are creating an Orchestra Document. Output ONLY a valid JSON object with these fields:\n{\"name\": string (required), \"description\": string, \"body\": string (detailed markdown content)}\n\nRules:\n- Output ONLY the raw JSON object. No markdown code fences. No explanation.\n- All values must be strings.\n- For the markdown content field, use proper markdown formatting.",
+				},
+				{
+					"key":         "feature",
+					"label":       "Feature",
+					"description": "System prompt for generating Feature definitions",
+					"prompt":      "You are creating an Orchestra Feature. Output ONLY a valid JSON object with these fields:\n{\"name\": string (required), \"description\": string, \"kind\": string (one of: feature, bug, hotfix, chore), \"priority\": string (one of: low, medium, high, critical)}\n\nRules:\n- Output ONLY the raw JSON object. No markdown code fences. No explanation.\n- All values must be strings.",
+				},
+				{
+					"key":         "plan",
+					"label":       "Plan",
+					"description": "System prompt for generating Plan definitions",
+					"prompt":      "You are creating an Orchestra Plan. Output ONLY a valid JSON object with these fields:\n{\"name\": string (required), \"description\": string, \"body\": string (detailed markdown content)}\n\nRules:\n- Output ONLY the raw JSON object. No markdown code fences. No explanation.\n- All values must be strings.\n- For the markdown content field, use proper markdown formatting.",
+				},
+				{
+					"key":         "request",
+					"label":       "Request",
+					"description": "System prompt for generating Request definitions",
+					"prompt":      "You are creating an Orchestra Request. Output ONLY a valid JSON object with these fields:\n{\"name\": string (required), \"description\": string, \"kind\": string (one of: feature, bug, hotfix), \"priority\": string (one of: low, medium, high, critical)}\n\nRules:\n- Output ONLY the raw JSON object. No markdown code fences. No explanation.\n- All values must be strings.",
+				},
+				{
+					"key":         "person",
+					"label":       "Person",
+					"description": "System prompt for generating Person profiles",
+					"prompt":      "You are creating an Orchestra Person profile. Output ONLY a valid JSON object with these fields:\n{\"name\": string (required), \"role\": string, \"bio\": string, \"github_email\": string}\n\nRules:\n- Output ONLY the raw JSON object. No markdown code fences. No explanation.\n- All values must be strings.",
+				},
+			},
 		},
 	}
 	if v, ok := defaults[key]; ok {
@@ -657,7 +710,7 @@ func (h *AdminSettingsHandler) GenerateSitemap(c fiber.Ctx) error {
 	}
 
 	// Load general settings for site URL
-	siteURL := "https://orchestra.dev"
+	siteURL := "https://orchestra-mcp.dev"
 	var generalSetting models.SystemSetting
 	if err := h.db.Where("key = ?", "general").First(&generalSetting).Error; err == nil {
 		var val map[string]interface{}

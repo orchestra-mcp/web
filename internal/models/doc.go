@@ -1,6 +1,10 @@
 package models
 
-import "gorm.io/datatypes"
+import (
+	"time"
+
+	"gorm.io/datatypes"
+)
 
 // Doc represents a wiki/documentation page (synced from MCP docs plugin).
 type Doc struct {
@@ -17,6 +21,8 @@ type Doc struct {
 	Version     int            `gorm:"default:1" json:"version"`
 	Meta        datatypes.JSON `json:"meta"`
 	Pinned      bool           `gorm:"default:false" json:"pinned"`
+	Published   bool           `gorm:"default:false" json:"published"`
+	PublishedAt *time.Time     `json:"published_at"`
 	Icon        string         `json:"icon"`
 	Color       string         `json:"color"`
 }

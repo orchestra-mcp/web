@@ -48,20 +48,29 @@ func (bc *BrowserConn) WriteMessage(msgType int, data []byte) error {
 	return bc.Conn.WriteMessage(msgType, data)
 }
 
+// smartActionEntry holds the response channel and optional progress channel
+// for a REST-based smart action.
+type smartActionEntry struct {
+	respCh     chan json.RawMessage // receives the final JSON-RPC response
+	progressCh chan string          // receives intermediate progress strings (buffered, optional)
+}
+
 // TunnelHub manages active reverse tunnel connections and browser sessions.
 // It acts as a relay: browser messages are forwarded to the reverse tunnel,
 // and responses from the reverse tunnel are routed back to the correct browser.
 type TunnelHub struct {
-	mu       sync.RWMutex
-	tunnels  map[string]*ReverseConn  // tunnel ID → active reverse connection
-	browsers map[string]*BrowserConn  // session ID → browser websocket
+	mu           sync.RWMutex
+	tunnels      map[string]*ReverseConn          // tunnel ID → active reverse connection
+	browsers     map[string]*BrowserConn          // session ID → browser websocket
+	smartActions map[string]*smartActionEntry      // session ID → response+progress channels (REST smart actions)
 }
 
 // NewTunnelHub creates a new TunnelHub.
 func NewTunnelHub() *TunnelHub {
 	return &TunnelHub{
-		tunnels:  make(map[string]*ReverseConn),
-		browsers: make(map[string]*BrowserConn),
+		tunnels:      make(map[string]*ReverseConn),
+		browsers:     make(map[string]*BrowserConn),
+		smartActions: make(map[string]*smartActionEntry),
 	}
 }
 
@@ -166,9 +175,37 @@ func (h *TunnelHub) ForwardToGate(tunnelID, sessionID string, message json.RawMe
 }
 
 // ForwardToBrowser routes a response from the reverse tunnel to the correct
-// browser session.
+// browser session or smart action channel.
+//
+// Progress envelopes (type == "progress") are forwarded to the progress channel
+// if one was registered; all other messages go to the response channel.
+// Final responses (any non-progress message) are sent to respCh.
 func (h *TunnelHub) ForwardToBrowser(sessionID string, message json.RawMessage) error {
 	h.mu.RLock()
+	// Check smart action entries first (REST-based actions).
+	if entry, ok := h.smartActions[sessionID]; ok {
+		h.mu.RUnlock()
+
+		// Peek at the envelope type to detect progress messages.
+		var peek struct {
+			Type string `json:"type"`
+			Text string `json:"text"`
+		}
+		if entry.progressCh != nil && json.Unmarshal(message, &peek) == nil && peek.Type == "progress" {
+			select {
+			case entry.progressCh <- peek.Text:
+			default:
+			}
+			return nil
+		}
+
+		// Final response — send to respCh (buffered 1, non-blocking).
+		select {
+		case entry.respCh <- message:
+		default:
+		}
+		return nil
+	}
 	bc, ok := h.browsers[sessionID]
 	h.mu.RUnlock()
 
@@ -178,6 +215,25 @@ func (h *TunnelHub) ForwardToBrowser(sessionID string, message json.RawMessage) 
 	}
 
 	return bc.WriteMessage(websocket.TextMessage, message)
+}
+
+// RegisterSmartAction registers a response channel for a REST-based smart action.
+// Optionally provide a progress channel to receive intermediate progress strings.
+// Pass nil for progressCh if progress streaming is not needed.
+func (h *TunnelHub) RegisterSmartAction(sessionID string, respCh chan json.RawMessage, progressCh chan string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.smartActions[sessionID] = &smartActionEntry{
+		respCh:     respCh,
+		progressCh: progressCh,
+	}
+}
+
+// UnregisterSmartAction removes a smart action response channel.
+func (h *TunnelHub) UnregisterSmartAction(sessionID string) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	delete(h.smartActions, sessionID)
 }
 
 // NotifyGateClose sends a close envelope to the reverse tunnel when a browser

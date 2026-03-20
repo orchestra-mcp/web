@@ -122,27 +122,29 @@ func (h *PasskeyHandler) BeginRegistration(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"rp": fiber.Map{
-			"id":   passkeyRPID(),
-			"name": passkeyRPName(),
+		"publicKey": fiber.Map{
+			"rp": fiber.Map{
+				"id":   passkeyRPID(),
+				"name": passkeyRPName(),
+			},
+			"user": fiber.Map{
+				"id":          userIDEncoded,
+				"name":        user.Email,
+				"displayName": user.Name,
+			},
+			"challenge": base64.RawURLEncoding.EncodeToString(challenge),
+			"pubKeyCredParams": []fiber.Map{
+				{"type": "public-key", "alg": -7},
+			},
+			"timeout": 60000,
+			"authenticatorSelection": fiber.Map{
+				"authenticatorAttachment": "platform",
+				"residentKey":             "preferred",
+				"userVerification":        "preferred",
+			},
+			"attestation":        "none",
+			"excludeCredentials": excludeCredentials,
 		},
-		"user": fiber.Map{
-			"id":          userIDEncoded,
-			"name":        user.Email,
-			"displayName": user.Name,
-		},
-		"challenge": base64.RawURLEncoding.EncodeToString(challenge),
-		"pubKeyCredParams": []fiber.Map{
-			{"type": "public-key", "alg": -7},
-		},
-		"timeout": 60000,
-		"authenticatorSelection": fiber.Map{
-			"authenticatorAttachment": "platform",
-			"residentKey":             "preferred",
-			"userVerification":        "preferred",
-		},
-		"attestation":        "none",
-		"excludeCredentials": excludeCredentials,
 	})
 }
 
@@ -353,12 +355,14 @@ func (h *PasskeyHandler) BeginAuthentication(c fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"challenge":        base64.RawURLEncoding.EncodeToString(challenge),
-		"timeout":          60000,
-		"rpId":             passkeyRPID(),
-		"userVerification": "preferred",
-		"allowCredentials": allowCredentials,
-		"session_id":       sessionID,
+		"publicKey": fiber.Map{
+			"challenge":        base64.RawURLEncoding.EncodeToString(challenge),
+			"timeout":          60000,
+			"rpId":             passkeyRPID(),
+			"userVerification": "preferred",
+			"allowCredentials": allowCredentials,
+		},
+		"session_id": sessionID,
 	})
 }
 

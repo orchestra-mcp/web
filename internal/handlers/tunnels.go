@@ -390,6 +390,145 @@ func (h *TunnelHandler) Heartbeat(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"ok": true})
 }
 
+// autoRegisterBody is the request body for POST /api/tunnels/auto-register.
+type autoRegisterBody struct {
+	Hostname     string `json:"hostname"`
+	OS           string `json:"os"`
+	Architecture string `json:"architecture"`
+	LocalIP      string `json:"local_ip"`
+	GateAddress  string `json:"gate_address"`
+	Workspace    string `json:"workspace"`
+	ToolCount    int    `json:"tool_count"`
+	Version      string `json:"version"`
+}
+
+// AutoRegister handles POST /api/tunnels/auto-register — registers or reconnects
+// a tunnel using the caller's JWT authentication. No manual token paste needed.
+// Upserts by (user_id, hostname, workspace) so the same machine reuses its tunnel.
+func (h *TunnelHandler) AutoRegister(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var body autoRegisterBody
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if body.Hostname == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "hostname is required"})
+	}
+
+	// Look up the user's active team.
+	var membership models.Membership
+	var teamID string
+	if err := h.db.Where("user_id = ?", user.ID).Order("created_at asc").First(&membership).Error; err == nil {
+		teamID = membership.TeamID
+	}
+
+	// Try to find an existing tunnel for this (user, hostname, workspace).
+	var existing models.Tunnel
+	q := h.db.Where("user_id = ? AND hostname = ?", user.ID, body.Hostname)
+	if body.Workspace != "" {
+		q = q.Where("workspace = ?", body.Workspace)
+	}
+
+	now := time.Now()
+
+	if err := q.First(&existing).Error; err == nil {
+		// Existing tunnel found — update it and generate a fresh connection token.
+		connToken, err := generateConnectionToken()
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate connection token"})
+		}
+
+		updates := map[string]any{
+			"connection_token": connToken,
+			"status":           string(models.TunnelStatusConnecting),
+			"last_seen_at":     &now,
+			"os":               body.OS,
+			"architecture":     body.Architecture,
+			"local_ip":         body.LocalIP,
+			"gate_address":     body.GateAddress,
+			"tool_count":       body.ToolCount,
+		}
+		if body.Version != "" {
+			updates["version"] = body.Version
+		}
+		if teamID != "" {
+			updates["team_id"] = teamID
+		}
+
+		h.db.Model(&existing).Updates(updates)
+
+		// Extract auth token for sync.
+		authToken := ""
+		if header := c.Get("Authorization"); header != "" {
+			authToken = strings.TrimPrefix(header, "Bearer ")
+		}
+
+		return c.JSON(fiber.Map{
+			"tunnel_id":        existing.ID,
+			"connection_token": connToken,
+			"team_id":          teamID,
+			"auth_token":       authToken,
+			"workspace":        body.Workspace,
+			"reconnected":      true,
+		})
+	}
+
+	// No existing tunnel — create a new one.
+	connToken, err := generateConnectionToken()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate connection token"})
+	}
+
+	name := body.Workspace
+	if name != "" {
+		name = filepath.Base(name)
+	}
+	if name == "" {
+		name = body.Hostname
+	}
+
+	tunnel := models.Tunnel{
+		UserID:          user.ID,
+		Name:            name,
+		Hostname:        body.Hostname,
+		OS:              body.OS,
+		Architecture:    body.Architecture,
+		GateAddress:     body.GateAddress,
+		ConnectionToken: connToken,
+		Status:          models.TunnelStatusConnecting,
+		LastSeenAt:      &now,
+		ToolCount:       body.ToolCount,
+		LocalIP:         body.LocalIP,
+		Workspace:       body.Workspace,
+		Version:         body.Version,
+	}
+	if teamID != "" {
+		tunnel.TeamID = &teamID
+	}
+
+	if err := h.db.Create(&tunnel).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to register tunnel"})
+	}
+
+	authToken := ""
+	if header := c.Get("Authorization"); header != "" {
+		authToken = strings.TrimPrefix(header, "Bearer ")
+	}
+
+	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
+		"tunnel_id":        tunnel.ID,
+		"connection_token": connToken,
+		"team_id":          teamID,
+		"auth_token":       authToken,
+		"workspace":        body.Workspace,
+		"reconnected":      false,
+	})
+}
+
 // --- Helpers ---
 
 // tunnelTokenPayload represents the decoded registration token from the CLI.

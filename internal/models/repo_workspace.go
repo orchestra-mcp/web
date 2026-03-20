@@ -27,5 +27,4 @@ type RepoWorkspace struct {
 	Topics      datatypes.JSON `json:"topics"`
 	IsPrivate   bool           `json:"is_private"`
 	Meta        datatypes.JSON `json:"meta"`
-	User        User           `gorm:"foreignKey:UserID" json:"-"`
 }

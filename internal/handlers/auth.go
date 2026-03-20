@@ -1,11 +1,16 @@
 package handlers
 
 import (
+	"crypto/hmac"
 	"crypto/rand"
+	"crypto/sha1"
 	"crypto/sha256"
+	"encoding/base32"
+	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
@@ -18,6 +23,31 @@ import (
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
 )
+
+// validateTOTP validates a 6-digit TOTP code against a base32-encoded secret.
+// It checks the current time step and ±1 step to allow for clock skew.
+func validateTOTP(secret string, code string) bool {
+	key, err := base32.StdEncoding.WithPadding(base32.NoPadding).DecodeString(strings.ToUpper(secret))
+	if err != nil {
+		return false
+	}
+	now := time.Now().Unix()
+	for _, offset := range []int64{0, -1, 1} {
+		counter := uint64((now / 30) + offset)
+		buf := make([]byte, 8)
+		binary.BigEndian.PutUint64(buf, counter)
+		mac := hmac.New(sha1.New, key)
+		mac.Write(buf)
+		sum := mac.Sum(nil)
+		off := sum[len(sum)-1] & 0x0F
+		trunc := binary.BigEndian.Uint32(sum[off:off+4]) & 0x7FFFFFFF
+		otp := fmt.Sprintf("%06d", trunc%uint32(math.Pow10(6)))
+		if otp == code {
+			return true
+		}
+	}
+	return false
+}
 
 // deviceAuthRequest represents a pending device authentication request.
 type deviceAuthRequest struct {
@@ -71,16 +101,39 @@ func (h *AuthHandler) Login(c fiber.Ctx) error {
 		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "account is suspended"})
 	}
 
+	// Cancel pending deletion on login
+	if user.Status == "pending_deletion" {
+		h.db.Model(&user).Updates(map[string]any{
+			"status":                "active",
+			"deletion_scheduled_at": nil,
+		})
+		user.Status = "active"
+		user.DeletionScheduledAt = nil
+	}
+
 	token, err := h.authService.GenerateJWT(&user)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate token"})
 	}
 
-	return c.JSON(fiber.Map{"ok": true, "token": token, "user": user})
+	return c.JSON(h.loginResponse(&user, token))
 }
 
 // Register handles POST /api/auth/register
 func (h *AuthHandler) Register(c fiber.Ctx) error {
+	// Check if registration is allowed
+	var generalSetting models.SystemSetting
+	if err := h.db.Where("key = ?", "general").First(&generalSetting).Error; err == nil {
+		var settings map[string]interface{}
+		if json.Unmarshal(generalSetting.Value, &settings) == nil {
+			if allow, ok := settings["allow_register"]; ok {
+				if allow == false {
+					return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "registration is currently disabled"})
+				}
+			}
+		}
+	}
+
 	var body struct {
 		Name     string `json:"name"`
 		Email    string `json:"email"`
@@ -124,7 +177,17 @@ func (h *AuthHandler) Register(c fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate token"})
 	}
 
-	return c.Status(fiber.StatusCreated).JSON(fiber.Map{"ok": true, "token": token, "user": user})
+	return c.Status(fiber.StatusCreated).JSON(h.loginResponse(&user, token))
+}
+
+// loginResponse builds a standard login response with optional team_id.
+func (h *AuthHandler) loginResponse(user *models.User, token string) fiber.Map {
+	resp := fiber.Map{"ok": true, "token": token, "user": user}
+	var membership models.Membership
+	if err := h.db.Where("user_id = ?", user.ID).Order("created_at ASC").First(&membership).Error; err == nil {
+		resp["team_id"] = membership.TeamID
+	}
+	return resp
 }
 
 // Logout handles POST /api/auth/logout
@@ -224,7 +287,7 @@ func (h *AuthHandler) VerifyOTP(c fiber.Ctx) error {
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate token"})
 		}
-		return c.JSON(fiber.Map{"ok": true, "token": token, "user": user})
+		return c.JSON(h.loginResponse(&user, token))
 
 	case "email_verification":
 		h.db.Model(&user).Update("email_verified_at", &now)
@@ -289,7 +352,7 @@ func (h *AuthHandler) VerifyMagicLink(c fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate token"})
 	}
 
-	return c.JSON(fiber.Map{"ok": true, "token": token, "user": user})
+	return c.JSON(h.loginResponse(&user, token))
 }
 
 // ResetPassword handles POST /api/auth/reset-password
@@ -339,7 +402,7 @@ func (h *AuthHandler) ResetPassword(c fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate token"})
 	}
 
-	return c.JSON(fiber.Map{"ok": true, "token": token, "user": user})
+	return c.JSON(h.loginResponse(&user, token))
 }
 
 // ForgotPassword handles POST /api/auth/forgot-password
@@ -402,7 +465,7 @@ func (h *AuthHandler) APIKeyExchange(c fiber.Ctx) error {
 				if err != nil {
 					return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate token"})
 				}
-				return c.JSON(fiber.Map{"ok": true, "token": token, "user": user})
+				return c.JSON(h.loginResponse(&user, token))
 			}
 		}
 	}
@@ -543,11 +606,16 @@ func (h *AuthHandler) DevicePoll(c fiber.Ctx) error {
 	// Clean up the store entry
 	deviceAuthStore.Delete(body.DeviceCode)
 
-	return c.JSON(fiber.Map{
+	resp := fiber.Map{
 		"status": "approved",
 		"token":  req.Token,
 		"user":   user,
-	})
+	}
+	var membership models.Membership
+	if err := h.db.Where("user_id = ?", user.ID).Order("created_at ASC").First(&membership).Error; err == nil {
+		resp["team_id"] = membership.TeamID
+	}
+	return c.JSON(resp)
 }
 
 // UpdateProfile handles PATCH /api/auth/profile
@@ -585,4 +653,241 @@ func (h *AuthHandler) UpdateProfile(c fiber.Ctx) error {
 
 	h.db.First(user, user.ID)
 	return c.JSON(user)
+}
+
+// Setup2FA handles POST /api/auth/2fa/setup
+func (h *AuthHandler) Setup2FA(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	secret := make([]byte, 20)
+	if _, err := rand.Read(secret); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate secret"})
+	}
+	b32Secret := base32.StdEncoding.WithPadding(base32.NoPadding).EncodeToString(secret)
+
+	if err := h.db.Model(user).Update("two_factor_secret", b32Secret).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save secret"})
+	}
+
+	qrURL := fmt.Sprintf("otpauth://totp/Orchestra:%s?secret=%s&issuer=Orchestra", user.Email, b32Secret)
+
+	return c.JSON(fiber.Map{
+		"qr_url": qrURL,
+		"secret": b32Secret,
+	})
+}
+
+// Confirm2FA handles POST /api/auth/2fa/confirm
+func (h *AuthHandler) Confirm2FA(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var body struct {
+		Code string `json:"code"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+
+	if len(body.Code) != 6 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "code must be 6 digits"})
+	}
+
+	// Ensure user has a pending secret
+	if err := h.db.First(user, user.ID).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load user"})
+	}
+	if user.TwoFactorSecret == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "2FA setup not initiated"})
+	}
+
+	if !validateTOTP(user.TwoFactorSecret, body.Code) {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid verification code"})
+	}
+
+	now := time.Now()
+	if err := h.db.Model(user).Updates(map[string]interface{}{
+		"two_factor_enabled":    true,
+		"two_factor_verified_at": &now,
+	}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to enable 2FA"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// Disable2FA handles POST /api/auth/2fa/disable
+func (h *AuthHandler) Disable2FA(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+
+	// Reload user to get password hash
+	if err := h.db.First(user, user.ID).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load user"})
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(body.Password)); err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid password"})
+	}
+
+	if err := h.db.Model(user).Updates(map[string]interface{}{
+		"two_factor_secret":      "",
+		"two_factor_enabled":     false,
+		"two_factor_verified_at": nil,
+	}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to disable 2FA"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// Verify2FA handles POST /api/auth/2fa/verify
+func (h *AuthHandler) Verify2FA(c fiber.Ctx) error {
+	var body struct {
+		Code  string `json:"code"`
+		Email string `json:"email"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+
+	if len(body.Code) != 6 {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "code must be 6 digits"})
+	}
+
+	var user models.User
+	if err := h.db.Where("email = ?", body.Email).First(&user).Error; err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid credentials"})
+	}
+
+	if !user.TwoFactorEnabled {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "2FA is not enabled for this account"})
+	}
+
+	if !validateTOTP(user.TwoFactorSecret, body.Code) {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid 2FA code"})
+	}
+
+	token, err := h.authService.GenerateJWT(&user)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to generate token"})
+	}
+
+	return c.JSON(fiber.Map{"token": token, "user": user})
+}
+
+// ChangePassword handles POST /api/auth/change-password
+func (h *AuthHandler) ChangePassword(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var body struct {
+		CurrentPassword string `json:"current_password"`
+		NewPassword     string `json:"new_password"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+
+	// Reload user to get password hash
+	if err := h.db.First(user, user.ID).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load user"})
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(body.CurrentPassword)); err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "current password is incorrect"})
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(body.NewPassword), 12)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to hash password"})
+	}
+
+	if err := h.db.Model(user).Updates(map[string]interface{}{
+		"password":     string(hashed),
+		"password_set": true,
+	}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update password"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// DeleteAccount handles DELETE /api/auth/account
+func (h *AuthHandler) DeleteAccount(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var body struct {
+		Password string `json:"password"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+
+	if body.Password == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "password is required"})
+	}
+
+	// Reload user to get password hash
+	if err := h.db.First(user, user.ID).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to load user"})
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(body.Password)); err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid password"})
+	}
+
+	// Schedule deletion 7 days from now
+	deletionTime := time.Now().Add(7 * 24 * time.Hour)
+	if err := h.db.Model(user).Updates(map[string]any{
+		"status":                "pending_deletion",
+		"deletion_scheduled_at": &deletionTime,
+	}).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to schedule deletion"})
+	}
+
+	return c.JSON(fiber.Map{
+		"ok":                    true,
+		"message":               "Account scheduled for deletion. Log in within 7 days to cancel.",
+		"deletion_scheduled_at": deletionTime.Format(time.RFC3339),
+	})
+}
+
+// CleanupDeletedAccounts permanently deletes users whose deletion grace period has expired.
+// Call this on server start and periodically (e.g. daily).
+func CleanupDeletedAccounts(db *gorm.DB) {
+	var users []models.User
+	db.Where("status = ? AND deletion_scheduled_at < ?", "pending_deletion", time.Now()).Find(&users)
+
+	for _, u := range users {
+		uid := u.ID
+		// Cascade delete user data
+		db.Where("user_id = ?", uid).Delete(&models.Passkey{})
+		db.Where("user_id = ?", uid).Delete(&models.OAuthAccount{})
+		db.Where("user_id = ?", uid).Delete(&models.MagicLinkToken{})
+		db.Where("user_id = ?", uid).Delete(&models.OtpCode{})
+		db.Where("user_id = ?", uid).Delete(&models.DeviceToken{})
+		db.Where("user_id = ?", uid).Delete(&models.Tunnel{})
+		// Hard delete the user (bypasses soft-delete)
+		db.Unscoped().Delete(&models.User{}, uid)
+	}
 }

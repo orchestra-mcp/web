@@ -23,5 +23,11 @@ type User struct {
 	PasswordSet           bool           `gorm:"default:false" json:"password_set"`
 	OnboardingCompletedAt *time.Time     `json:"onboarding_completed_at"`
 	Settings              datatypes.JSON `json:"settings"`
+	TwoFactorSecret       string         `json:"-"`
+	TwoFactorEnabled      bool           `gorm:"default:false" json:"two_factor_enabled"`
+	TwoFactorVerifiedAt   *time.Time     `json:"two_factor_verified_at"`
+	DeletionScheduledAt   *time.Time     `json:"deletion_scheduled_at"`
 	RememberToken         string         `json:"-"`
+	IsVerified            bool           `gorm:"default:false" json:"is_verified"`
+	VerifiedAt            *time.Time     `json:"verified_at"`
 }

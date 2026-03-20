@@ -1,6 +1,8 @@
 package database
 
 import (
+	"log"
+
 	"github.com/orchestra-mcp/web/internal/config"
 	"github.com/orchestra-mcp/web/internal/models"
 	"gorm.io/driver/postgres"
@@ -23,8 +25,9 @@ func Connect(cfg *config.Config) (*gorm.DB, error) {
 }
 
 // AutoMigrate runs GORM auto-migration for all models.
+// Each model is migrated individually so a single failure doesn't block the rest.
 func AutoMigrate(db *gorm.DB) error {
-	return db.AutoMigrate(
+	allModels := []interface{}{
 		&models.User{},
 		&models.Team{},
 		&models.Membership{},
@@ -64,5 +67,49 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.CommunityPost{},
 		&models.GitHubIssue{},
 		&models.GitHubRepo{},
-	)
+		&models.Workspace{},
+		&models.WorkspaceTeam{},
+		&models.Skill{},
+		&models.Agent{},
+		&models.ProjectSkill{},
+		&models.ProjectAgent{},
+		&models.ActionHistory{},
+		&models.ActionLog{},
+		&models.CommunityLike{},
+		&models.HealthProfile{},
+		&models.WaterLog{},
+		&models.MealLog{},
+		&models.CaffeineLog{},
+		&models.PomodoroSession{},
+		&models.SleepConfig{},
+		&models.HealthSnapshot{},
+		&models.Workflow{},
+		&models.Delegation{},
+		&models.MCPEventLog{},
+		&models.SharedContent{},
+		&models.ShareComment{},
+		&models.PushSubscription{},
+		&models.UserSetting{},
+		&models.SleepLog{},
+		&models.BadgeDefinition{},
+		&models.UserBadge{},
+		&models.VerificationType{},
+		&models.UserVerification{},
+		&models.ApiCollection{},
+		&models.ApiEndpoint{},
+		&models.ApiEnvironment{},
+		&models.Presentation{},
+		&models.PresentationSlide{},
+		&models.UserWallet{},
+		&models.PointsTransaction{},
+		&models.TeamShare{},
+		&models.ContentView{},
+		&models.CustomDomain{},
+	}
+	for _, m := range allModels {
+		if err := db.AutoMigrate(m); err != nil {
+			log.Printf("migrate warning: %T: %v", m, err)
+		}
+	}
+	return nil
 }

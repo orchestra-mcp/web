@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"github.com/gofiber/fiber/v3"
+	"github.com/orchestra-mcp/web/internal/hub"
 	"github.com/orchestra-mcp/web/internal/middleware"
 	"github.com/orchestra-mcp/web/internal/models"
 	"gorm.io/gorm"
@@ -9,12 +10,17 @@ import (
 
 // DocHandler handles wiki/documentation endpoints.
 type DocHandler struct {
-	db *gorm.DB
+	db  *gorm.DB
+	hub *hub.Hub
 }
 
 // NewDocHandler creates a new DocHandler.
-func NewDocHandler(db *gorm.DB) *DocHandler {
-	return &DocHandler{db: db}
+func NewDocHandler(db *gorm.DB, wsHub ...*hub.Hub) *DocHandler {
+	h := &DocHandler{db: db}
+	if len(wsHub) > 0 {
+		h.hub = wsHub[0]
+	}
+	return h
 }
 
 // List returns docs for a project.
@@ -147,6 +153,7 @@ func (h *DocHandler) SystemUpdate(c fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update doc"})
 	}
 
+	broadcastSync(h.hub, user.ID, "doc", doc.DocID, "upsert")
 	return c.JSON(doc)
 }
 
@@ -172,6 +179,7 @@ func (h *DocHandler) SystemPin(c fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update doc"})
 	}
 
+	broadcastSync(h.hub, user.ID, "doc", doc.DocID, "upsert")
 	return c.JSON(doc)
 }
 
@@ -195,5 +203,49 @@ func (h *DocHandler) SystemDelete(c fiber.Ctx) error {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "doc not found"})
 	}
 
+	broadcastSync(h.hub, user.ID, "doc", id, "delete")
 	return c.JSON(fiber.Map{"ok": true})
+}
+
+// PublicDocList returns published docs for a team's project (no auth required).
+// GET /api/public/docs/:team/:project
+func (h *DocHandler) PublicDocList(c fiber.Ctx) error {
+	teamSlug := c.Params("team")
+	projectSlug := c.Params("project")
+
+	// Find the team by slug.
+	var team models.Team
+	if err := h.db.Where("slug = ?", teamSlug).First(&team).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "team not found"})
+	}
+
+	var docs []models.Doc
+	if err := h.db.Where("team_id = ? AND project_slug = ? AND published = ?", team.ID, projectSlug, true).
+		Order("title ASC").Find(&docs).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to list docs"})
+	}
+
+	return c.JSON(docs)
+}
+
+// PublicDocShow returns a single published doc (no auth required).
+// GET /api/public/docs/:team/:project/:slug
+func (h *DocHandler) PublicDocShow(c fiber.Ctx) error {
+	teamSlug := c.Params("team")
+	projectSlug := c.Params("project")
+	docSlug := c.Params("slug")
+
+	// Find the team by slug.
+	var team models.Team
+	if err := h.db.Where("slug = ?", teamSlug).First(&team).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "team not found"})
+	}
+
+	var doc models.Doc
+	if err := h.db.Where("team_id = ? AND project_slug = ? AND doc_id = ? AND published = ?",
+		team.ID, projectSlug, docSlug, true).First(&doc).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "doc not found"})
+	}
+
+	return c.JSON(doc)
 }

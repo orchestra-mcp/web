@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v3"
+	"github.com/orchestra-mcp/web/internal/config"
 	"github.com/orchestra-mcp/web/internal/middleware"
 	"github.com/orchestra-mcp/web/internal/models"
 	"gorm.io/gorm"
@@ -16,12 +17,17 @@ import (
 
 // TeamHandler handles team management endpoints.
 type TeamHandler struct {
-	db *gorm.DB
+	db  *gorm.DB
+	cfg *config.Config
 }
 
 // NewTeamHandler creates a new TeamHandler.
-func NewTeamHandler(db *gorm.DB) *TeamHandler {
-	return &TeamHandler{db: db}
+func NewTeamHandler(db *gorm.DB, cfg ...*config.Config) *TeamHandler {
+	h := &TeamHandler{db: db}
+	if len(cfg) > 0 && cfg[0] != nil {
+		h.cfg = cfg[0]
+	}
+	return h
 }
 
 // List handles GET /api/teams
@@ -414,29 +420,137 @@ func (h *TeamHandler) UploadTeamAvatar(c fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "file too large, max 2MB"})
 	}
 
-	uploadDir := "uploads/avatars"
-	if err := os.MkdirAll(uploadDir, 0755); err != nil {
+	baseDir := "uploads"
+	if h.cfg != nil && h.cfg.UploadDir != "" {
+		baseDir = h.cfg.UploadDir
+	}
+	avatarDir := filepath.Join(baseDir, "avatars")
+	if err := os.MkdirAll(avatarDir, 0755); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create upload directory"})
 	}
 
 	filename := fmt.Sprintf("team-%s-%d%s", myMembership.TeamID, time.Now().Unix(), ext)
-	savePath := filepath.Join(uploadDir, filename)
+	savePath := filepath.Join(avatarDir, filename)
 	if err := c.SaveFile(file, savePath); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to save file"})
 	}
 
 	// Delete old avatar file if it exists
 	if myMembership.Team.AvatarURL != "" && strings.HasPrefix(myMembership.Team.AvatarURL, "/uploads/avatars/") {
-		oldPath := strings.TrimPrefix(myMembership.Team.AvatarURL, "/")
-		_ = os.Remove(oldPath)
+		oldFilename := strings.TrimPrefix(myMembership.Team.AvatarURL, "/uploads/avatars/")
+		_ = os.Remove(filepath.Join(avatarDir, oldFilename))
 	}
 
-	avatarURL := "/" + savePath
+	avatarURL := "/uploads/avatars/" + filename
 	if err := h.db.Model(&models.Team{}).Where("id = ?", myMembership.TeamID).Update("avatar_url", avatarURL).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update avatar"})
 	}
 
 	return c.JSON(fiber.Map{"ok": true, "avatar_url": avatarURL})
+}
+
+// ShowMember handles GET /api/team/members/:id — returns a single team member.
+func (h *TeamHandler) ShowMember(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	memberUserID := c.Params("id")
+
+	// Find the user's team
+	var myMembership models.Membership
+	q := h.db.Where("user_id = ?", user.ID)
+	if teamID := c.Query("team_id"); teamID != "" {
+		q = q.Where("team_id = ?", teamID)
+	}
+	if err := q.First(&myMembership).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "team not found"})
+	}
+
+	// Find the member in the same team
+	var membership models.Membership
+	if err := h.db.Where("team_id = ? AND user_id = ?", myMembership.TeamID, memberUserID).
+		Preload("User").First(&membership).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "member not found"})
+	}
+
+	return c.JSON(fiber.Map{
+		"id":         membership.User.ID,
+		"name":       membership.User.Name,
+		"email":      membership.User.Email,
+		"role":       membership.Role,
+		"status":     membership.User.Status,
+		"avatar_url": membership.User.AvatarURL,
+		"joined_at":  membership.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	})
+}
+
+// UpdateMemberRole handles PATCH /api/team/members/:id/role — team owner/admin updates a member's role.
+func (h *TeamHandler) UpdateMemberRole(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	memberUserID := c.Params("id")
+
+	// Find the user's team where they are owner or admin
+	var myMembership models.Membership
+	q := h.db.Where("user_id = ? AND role IN ?", user.ID, []string{"owner", "admin"})
+	if teamID := c.Query("team_id"); teamID != "" {
+		q = q.Where("team_id = ?", teamID)
+	}
+	if err := q.First(&myMembership).Error; err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "insufficient permissions"})
+	}
+
+	var body struct {
+		Role string `json:"role"`
+	}
+	if err := json.Unmarshal(c.Body(), &body); err != nil || body.Role == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "role is required"})
+	}
+
+	valid := map[string]bool{"owner": true, "admin": true, "member": true, "viewer": true}
+	if !valid[body.Role] {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid role"})
+	}
+
+	if err := h.db.Model(&models.Membership{}).
+		Where("team_id = ? AND user_id = ?", myMembership.TeamID, memberUserID).
+		Update("role", body.Role).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to update role"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true})
+}
+
+// RemoveMember handles DELETE /api/team/members/:id — team owner/admin removes a member.
+func (h *TeamHandler) RemoveMember(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	memberUserID := c.Params("id")
+
+	// Find the user's team where they are owner or admin
+	var myMembership models.Membership
+	q := h.db.Where("user_id = ? AND role IN ?", user.ID, []string{"owner", "admin"})
+	if teamID := c.Query("team_id"); teamID != "" {
+		q = q.Where("team_id = ?", teamID)
+	}
+	if err := q.First(&myMembership).Error; err != nil {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{"error": "insufficient permissions"})
+	}
+
+	result := h.db.Where("team_id = ? AND user_id = ?", myMembership.TeamID, memberUserID).Delete(&models.Membership{})
+	if result.RowsAffected == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "member not found"})
+	}
+
+	return c.JSON(fiber.Map{"ok": true})
 }
 
 // ListAll handles GET /api/admin/teams — returns ALL teams system-wide (admin only).

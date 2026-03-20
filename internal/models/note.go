@@ -12,6 +12,9 @@ type Note struct {
 	Content   string         `gorm:"type:text" json:"content"`
 	Pinned    bool           `gorm:"default:false" json:"pinned"`
 	Tags      datatypes.JSON `json:"tags"`
+	Scope     string         `gorm:"default:personal" json:"scope"` // personal | team | public
+	PublicURL string         `json:"public_url"`
+	Slug      string         `gorm:"index" json:"slug"`
 	Meta      datatypes.JSON `json:"meta"`
 	Version   int            `gorm:"default:1" json:"version"`
 	User      User           `gorm:"foreignKey:UserID" json:"-"`

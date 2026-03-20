@@ -3,6 +3,7 @@ package services
 import (
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/orchestra-mcp/web/internal/models"
@@ -13,14 +14,123 @@ import (
 
 // SyncRecord represents a single entity change from a client push.
 type SyncRecord struct {
-	EntityType     string          `json:"entity_type"`
-	EntityID       string          `json:"entity_id"`
-	Action         string          `json:"action"` // upsert | delete
-	Payload        json.RawMessage `json:"payload"`
-	Version        int64           `json:"version"`
-	IdempotencyKey *string         `json:"idempotency_key"`
-	TeamID         *string         `json:"team_id"`
-	TunnelID       *string         `json:"tunnel_id"`
+	EntityType      string          `json:"entity_type"`
+	EntityID        string          `json:"entity_id"`
+	Action          string          `json:"action"` // upsert | delete
+	Payload         json.RawMessage `json:"payload"`
+	Version         int64           `json:"version"`
+	ClientTimestamp *time.Time      `json:"client_timestamp,omitempty"` // device-local write timestamp for LWW
+	IdempotencyKey  *string         `json:"idempotency_key"`
+	TeamID          *string         `json:"team_id"`
+	TunnelID        *string         `json:"tunnel_id"`
+}
+
+// ConflictInfo describes a detected version conflict for a single push record.
+type ConflictInfo struct {
+	EntityType      string
+	EntityID        string
+	ServerVersion   int64
+	ClientVersion   int64
+	ServerUpdatedAt time.Time
+	ClientTimestamp *time.Time
+}
+
+// DetectConflict queries the server-side version of the entity and returns
+// conflict information when the server has a strictly newer version than the
+// incoming client record. Returns nil if no conflict or entity is new.
+//
+// A conflict means: server_version > client_version — the server has changes
+// the client hasn't seen yet. LWW resolution uses client_timestamp vs
+// server updated_at to decide which payload wins.
+func (s *SyncService) DetectConflict(record SyncRecord, userID uint, db *gorm.DB) (*ConflictInfo, error) {
+	if record.Action == "delete" {
+		return nil, nil // deletes are always authoritative
+	}
+	sv, sat, err := s.serverVersion(record, userID, db)
+	if err != nil || sv == 0 {
+		return nil, nil // entity doesn't exist yet — no conflict
+	}
+	if sv <= record.Version {
+		return nil, nil // server is at same or older version — no conflict
+	}
+	return &ConflictInfo{
+		EntityType:      record.EntityType,
+		EntityID:        record.EntityID,
+		ServerVersion:   sv,
+		ClientVersion:   record.Version,
+		ServerUpdatedAt: sat,
+		ClientTimestamp: record.ClientTimestamp,
+	}, nil
+}
+
+// serverVersion returns the server-stored version and updated_at for the entity.
+// Returns (0, zero, nil) when the entity doesn't exist.
+func (s *SyncService) serverVersion(record SyncRecord, userID uint, db *gorm.DB) (int64, time.Time, error) {
+	scope := ownerScope(db, userID, record.TeamID)
+
+	switch record.EntityType {
+	case "project":
+		var r struct {
+			Version   int       `gorm:"column:version"`
+			UpdatedAt time.Time `gorm:"column:updated_at"`
+		}
+		err := scope.Model(&models.Project{}).Where("slug = ?", record.EntityID).
+			Select("version, updated_at").Scan(&r).Error
+		return int64(r.Version), r.UpdatedAt, err
+	case "feature":
+		var r struct {
+			Version   int       `gorm:"column:version"`
+			UpdatedAt time.Time `gorm:"column:updated_at"`
+		}
+		err := scope.Model(&models.Feature{}).Where("id = ?", record.EntityID).
+			Select("version, updated_at").Scan(&r).Error
+		return int64(r.Version), r.UpdatedAt, err
+	case "note":
+		var r struct {
+			Version   int       `gorm:"column:version"`
+			UpdatedAt time.Time `gorm:"column:updated_at"`
+		}
+		err := scope.Model(&models.Note{}).Where("id = ?", record.EntityID).
+			Select("version, updated_at").Scan(&r).Error
+		return int64(r.Version), r.UpdatedAt, err
+	case "plan":
+		var r struct {
+			Version   int       `gorm:"column:version"`
+			UpdatedAt time.Time `gorm:"column:updated_at"`
+		}
+		err := scope.Model(&models.Plan{}).Where("id = ?", record.EntityID).
+			Select("version, updated_at").Scan(&r).Error
+		return int64(r.Version), r.UpdatedAt, err
+	case "doc":
+		var r struct {
+			Version   int       `gorm:"column:version"`
+			UpdatedAt time.Time `gorm:"column:updated_at"`
+		}
+		err := scope.Model(&models.Doc{}).Where("id = ?", record.EntityID).
+			Select("version, updated_at").Scan(&r).Error
+		return int64(r.Version), r.UpdatedAt, err
+	case "person":
+		var r struct {
+			Version   int       `gorm:"column:version"`
+			UpdatedAt time.Time `gorm:"column:updated_at"`
+		}
+		err := scope.Model(&models.Person{}).Where("id = ?", record.EntityID).
+			Select("version, updated_at").Scan(&r).Error
+		return int64(r.Version), r.UpdatedAt, err
+	default:
+		// For entity types without tracked version, report no conflict.
+		return 0, time.Time{}, nil
+	}
+}
+
+// ResolveConflict determines the winning payload using last-write-wins.
+// If client_timestamp is provided and is strictly newer than server updated_at,
+// the client wins (returns true). Otherwise the server wins (returns false).
+func ResolveConflict(info *ConflictInfo) bool {
+	if info.ClientTimestamp == nil {
+		return false // no client timestamp — server wins
+	}
+	return info.ClientTimestamp.After(info.ServerUpdatedAt)
 }
 
 // SyncService handles LWW sync logic for entity push/pull.
@@ -29,6 +139,45 @@ type SyncService struct{}
 // NewSyncService creates a new SyncService.
 func NewSyncService() *SyncService {
 	return &SyncService{}
+}
+
+// ownerScope returns a GORM scope that matches records owned by userID
+// OR belonging to the record's team (when teamID is set).
+// This ensures team members can read/update each other's records.
+func ownerScope(db *gorm.DB, userID uint, teamID *string) *gorm.DB {
+	if teamID != nil && *teamID != "" {
+		return db.Where("user_id = ? OR team_id = ?", userID, *teamID)
+	}
+	return db.Where("user_id = ?", userID)
+}
+
+// ensureProject creates a project row for the given slug if one doesn't exist yet.
+// Called by project-scoped apply* methods so the projects list is always in sync.
+func ensureProject(db *gorm.DB, userID uint, teamID *string, slug string) {
+	if slug == "" {
+		return
+	}
+	var count int64
+	ownerScope(db, userID, teamID).Model(&models.Project{}).Where("slug = ?", slug).Count(&count)
+	if count > 0 {
+		return
+	}
+	// Derive a human-readable name from the slug (e.g. "orchestra-agents" → "Orchestra Agents").
+	words := strings.Fields(strings.ReplaceAll(slug, "-", " "))
+	for i, w := range words {
+		if len(w) > 0 {
+			words[i] = strings.ToUpper(w[:1]) + w[1:]
+		}
+	}
+	p := models.Project{
+		UserID:     userID,
+		TeamID:     teamID,
+		Slug:       slug,
+		Name:       strings.Join(words, " "),
+		SyncStatus: "not_synced",
+		Version:    1,
+	}
+	db.Create(&p)
 }
 
 // Apply applies a single sync record to the database using last-write-wins.
@@ -62,6 +211,14 @@ func (s *SyncService) Apply(record SyncRecord, userID uint, db *gorm.DB) error {
 		return s.applySessionTurn(record, userID, payload, db)
 	case "doc":
 		return s.applyDoc(record, userID, payload, db)
+	case "skill":
+		return s.applySkill(record, userID, payload, db)
+	case "agent":
+		return s.applyAgent(record, userID, payload, db)
+	case "delegation":
+		return s.applyDelegation(record, userID, payload, db)
+	case "workflow":
+		return s.applyWorkflow(record, userID, payload, db)
 	default:
 		// Unknown entity type — skip silently
 		return nil
@@ -78,12 +235,12 @@ func (s *SyncService) applyProject(record SyncRecord, userID uint, payload datat
 	}
 
 	if record.Action == "delete" {
-		return db.Where("slug = ? AND user_id = ?", slug, userID).
-			Delete(&models.Project{}).Error
+		return ownerScope(db, userID, record.TeamID).
+			Where("slug = ?", slug).Delete(&models.Project{}).Error
 	}
 
 	var project models.Project
-	err := db.Where("slug = ? AND user_id = ?", slug, userID).First(&project).Error
+	err := ownerScope(db, userID, record.TeamID).Where("slug = ?", slug).First(&project).Error
 	if err == nil && int64(project.Version) >= record.Version {
 		return nil
 	}
@@ -182,12 +339,12 @@ func (s *SyncService) applyTask(record SyncRecord, userID uint, payload datatype
 
 func (s *SyncService) applyNote(record SyncRecord, userID uint, payload datatypes.JSON, db *gorm.DB) error {
 	if record.Action == "delete" {
-		return db.Where("id = ? AND user_id = ?", record.EntityID, userID).
-			Delete(&models.Note{}).Error
+		return ownerScope(db, userID, record.TeamID).
+			Where("id = ?", record.EntityID).Delete(&models.Note{}).Error
 	}
 
 	var existing models.Note
-	err := db.Where("id = ? AND user_id = ?", record.EntityID, userID).First(&existing).Error
+	err := ownerScope(db, userID, record.TeamID).Where("id = ?", record.EntityID).First(&existing).Error
 
 	if err == nil {
 		if int64(existing.Version) >= record.Version {
@@ -290,13 +447,13 @@ func (s *SyncService) applyFeature(record SyncRecord, userID uint, payload datat
 	}
 
 	if record.Action == "delete" {
-		return db.Where("feature_id = ? AND user_id = ?", featureID, userID).
-			Delete(&models.Feature{}).Error
+		return ownerScope(db, userID, record.TeamID).
+			Where("feature_id = ?", featureID).Delete(&models.Feature{}).Error
 	}
 
-	// Look up by feature_id + user_id (not Base.ID which is a UUID).
+	// Look up by feature_id scoped to owner/team.
 	var feature models.Feature
-	err := db.Where("feature_id = ? AND user_id = ?", featureID, userID).First(&feature).Error
+	err := ownerScope(db, userID, record.TeamID).Where("feature_id = ?", featureID).First(&feature).Error
 	if err == nil && int64(feature.Version) >= record.Version {
 		return nil
 	}
@@ -308,6 +465,7 @@ func (s *SyncService) applyFeature(record SyncRecord, userID uint, payload datat
 	feature.Meta = payload
 	if v, ok := data["project_slug"].(string); ok {
 		feature.ProjectSlug = v
+		ensureProject(db, userID, record.TeamID, v)
 	}
 	if v, ok := data["title"].(string); ok {
 		feature.Title = v
@@ -352,12 +510,12 @@ func (s *SyncService) applyPlan(record SyncRecord, userID uint, payload datatype
 	}
 
 	if record.Action == "delete" {
-		return db.Where("plan_id = ? AND user_id = ?", planID, userID).
-			Delete(&models.Plan{}).Error
+		return ownerScope(db, userID, record.TeamID).
+			Where("plan_id = ?", planID).Delete(&models.Plan{}).Error
 	}
 
 	var plan models.Plan
-	err := db.Where("plan_id = ? AND user_id = ?", planID, userID).First(&plan).Error
+	err := ownerScope(db, userID, record.TeamID).Where("plan_id = ?", planID).First(&plan).Error
 	if err == nil && int64(plan.Version) >= record.Version {
 		return nil
 	}
@@ -368,6 +526,7 @@ func (s *SyncService) applyPlan(record SyncRecord, userID uint, payload datatype
 	plan.Meta = payload
 	if v, ok := data["project_slug"].(string); ok {
 		plan.ProjectSlug = v
+		ensureProject(db, userID, record.TeamID, v)
 	}
 	if v, ok := data["title"].(string); ok {
 		plan.Title = v
@@ -401,12 +560,12 @@ func (s *SyncService) applyPerson(record SyncRecord, userID uint, payload dataty
 	}
 
 	if record.Action == "delete" {
-		return db.Where("person_id = ? AND user_id = ?", personID, userID).
-			Delete(&models.Person{}).Error
+		return ownerScope(db, userID, record.TeamID).
+			Where("person_id = ?", personID).Delete(&models.Person{}).Error
 	}
 
 	var person models.Person
-	err := db.Where("person_id = ? AND user_id = ?", personID, userID).First(&person).Error
+	err := ownerScope(db, userID, record.TeamID).Where("person_id = ?", personID).First(&person).Error
 	if err == nil && int64(person.Version) >= record.Version {
 		return nil
 	}
@@ -417,6 +576,7 @@ func (s *SyncService) applyPerson(record SyncRecord, userID uint, payload dataty
 	person.Meta = payload
 	if v, ok := data["project_slug"].(string); ok {
 		person.ProjectSlug = v
+		ensureProject(db, userID, record.TeamID, v)
 	}
 	if v, ok := data["name"].(string); ok {
 		person.Name = v
@@ -456,12 +616,12 @@ func (s *SyncService) applyRequest(record SyncRecord, userID uint, payload datat
 	}
 
 	if record.Action == "delete" {
-		return db.Where("request_id = ? AND user_id = ?", requestID, userID).
-			Delete(&models.Request{}).Error
+		return ownerScope(db, userID, record.TeamID).
+			Where("request_id = ?", requestID).Delete(&models.Request{}).Error
 	}
 
 	var request models.Request
-	err := db.Where("request_id = ? AND user_id = ?", requestID, userID).First(&request).Error
+	err := ownerScope(db, userID, record.TeamID).Where("request_id = ?", requestID).First(&request).Error
 	if err == nil && int64(request.Version) >= record.Version {
 		return nil
 	}
@@ -472,6 +632,7 @@ func (s *SyncService) applyRequest(record SyncRecord, userID uint, payload datat
 	request.Meta = payload
 	if v, ok := data["project_slug"].(string); ok {
 		request.ProjectSlug = v
+		ensureProject(db, userID, record.TeamID, v)
 	}
 	if v, ok := data["title"].(string); ok {
 		request.Title = v
@@ -511,12 +672,12 @@ func (s *SyncService) applyAssignmentRule(record SyncRecord, userID uint, payloa
 	}
 
 	if record.Action == "delete" {
-		return db.Where("rule_id = ? AND user_id = ?", ruleID, userID).
-			Delete(&models.AssignmentRule{}).Error
+		return ownerScope(db, userID, record.TeamID).
+			Where("rule_id = ?", ruleID).Delete(&models.AssignmentRule{}).Error
 	}
 
 	var rule models.AssignmentRule
-	err := db.Where("rule_id = ? AND user_id = ?", ruleID, userID).First(&rule).Error
+	err := ownerScope(db, userID, record.TeamID).Where("rule_id = ?", ruleID).First(&rule).Error
 	if err == nil && int64(rule.Version) >= record.Version {
 		return nil
 	}
@@ -527,6 +688,7 @@ func (s *SyncService) applyAssignmentRule(record SyncRecord, userID uint, payloa
 	rule.Meta = payload
 	if v, ok := data["project_slug"].(string); ok {
 		rule.ProjectSlug = v
+		ensureProject(db, userID, record.TeamID, v)
 	}
 	if v, ok := data["kind"].(string); ok {
 		rule.Kind = v
@@ -583,6 +745,243 @@ func (s *SyncService) applySessionTurn(record SyncRecord, userID uint, payload d
 	return db.Save(&turn).Error
 }
 
+func (s *SyncService) applySkill(record SyncRecord, userID uint, payload datatypes.JSON, db *gorm.DB) error {
+	var data map[string]interface{}
+	_ = json.Unmarshal(record.Payload, &data)
+
+	slug := record.EntityID
+	if v, ok := data["slug"].(string); ok {
+		slug = v
+	}
+
+	if record.Action == "delete" {
+		return ownerScope(db, userID, record.TeamID).
+			Where("slug = ?", slug).Delete(&models.Skill{}).Error
+	}
+
+	var skill models.Skill
+	err := ownerScope(db, userID, record.TeamID).Where("slug = ?", slug).First(&skill).Error
+	if err == nil && int64(skill.Version) >= record.Version {
+		return nil
+	}
+
+	skill.UserID = userID
+	skill.Slug = slug
+	skill.Version = int(record.Version)
+	skill.Meta = payload
+	if v, ok := data["name"].(string); ok {
+		skill.Name = v
+	}
+	if v, ok := data["description"].(string); ok {
+		skill.Description = v
+	}
+	if v, ok := data["content"].(string); ok {
+		skill.Content = v
+	}
+	if v, ok := data["scope"].(string); ok {
+		skill.Scope = v
+	}
+	if v, ok := data["icon"].(string); ok {
+		skill.Icon = v
+	}
+	if v, ok := data["color"].(string); ok {
+		skill.Color = v
+	}
+	if record.TeamID != nil {
+		skill.TeamID = record.TeamID
+	}
+
+	if skill.Base.ID == "" {
+		return db.Create(&skill).Error
+	}
+	return db.Save(&skill).Error
+}
+
+func (s *SyncService) applyAgent(record SyncRecord, userID uint, payload datatypes.JSON, db *gorm.DB) error {
+	var data map[string]interface{}
+	_ = json.Unmarshal(record.Payload, &data)
+
+	slug := record.EntityID
+	if v, ok := data["slug"].(string); ok {
+		slug = v
+	}
+
+	if record.Action == "delete" {
+		return ownerScope(db, userID, record.TeamID).
+			Where("slug = ?", slug).Delete(&models.Agent{}).Error
+	}
+
+	var agent models.Agent
+	err := ownerScope(db, userID, record.TeamID).Where("slug = ?", slug).First(&agent).Error
+	if err == nil && int64(agent.Version) >= record.Version {
+		return nil
+	}
+
+	agent.UserID = userID
+	agent.Slug = slug
+	agent.Version = int(record.Version)
+	agent.Meta = payload
+	if v, ok := data["name"].(string); ok {
+		agent.Name = v
+	}
+	if v, ok := data["description"].(string); ok {
+		agent.Description = v
+	}
+	if v, ok := data["content"].(string); ok {
+		agent.Content = v
+	}
+	if v, ok := data["scope"].(string); ok {
+		agent.Scope = v
+	}
+	if v, ok := data["icon"].(string); ok {
+		agent.Icon = v
+	}
+	if v, ok := data["color"].(string); ok {
+		agent.Color = v
+	}
+	if record.TeamID != nil {
+		agent.TeamID = record.TeamID
+	}
+
+	if agent.Base.ID == "" {
+		return db.Create(&agent).Error
+	}
+	return db.Save(&agent).Error
+}
+
+func (s *SyncService) applyDelegation(record SyncRecord, userID uint, payload datatypes.JSON, db *gorm.DB) error {
+	var data map[string]interface{}
+	_ = json.Unmarshal(record.Payload, &data)
+
+	delegationID := record.EntityID
+	if v, ok := data["id"].(string); ok {
+		delegationID = v
+	} else if v, ok := data["delegation_id"].(string); ok {
+		delegationID = v
+	}
+
+	if record.Action == "delete" {
+		return ownerScope(db, userID, record.TeamID).
+			Where("delegation_id = ?", delegationID).Delete(&models.Delegation{}).Error
+	}
+
+	var delegation models.Delegation
+	err := ownerScope(db, userID, record.TeamID).Where("delegation_id = ?", delegationID).First(&delegation).Error
+	if err == nil && int64(delegation.Version) >= record.Version {
+		return nil
+	}
+
+	delegation.UserID = userID
+	delegation.DelegationID = delegationID
+	delegation.Version = int(record.Version)
+	delegation.Meta = payload
+	if v, ok := data["project_slug"].(string); ok {
+		delegation.ProjectSlug = v
+		ensureProject(db, userID, record.TeamID, v)
+	}
+	if v, ok := data["feature_id"].(string); ok {
+		delegation.FeatureID = v
+	}
+	if v, ok := data["from_person"].(string); ok {
+		delegation.FromPerson = v
+	}
+	if v, ok := data["to_person"].(string); ok {
+		delegation.ToPerson = v
+	}
+	if v, ok := data["question"].(string); ok {
+		delegation.Question = v
+	}
+	if v, ok := data["context"].(string); ok {
+		delegation.Context = v
+	}
+	if v, ok := data["response"].(string); ok {
+		delegation.Response = v
+	}
+	if v, ok := data["status"].(string); ok {
+		delegation.Status = v
+	}
+	if v, ok := data["body"].(string); ok {
+		delegation.Body = v
+	}
+	if v, ok := data["responded_at"].(string); ok {
+		if t, err := time.Parse(time.RFC3339, v); err == nil {
+			delegation.RespondedAt = &t
+		}
+	}
+	if record.TeamID != nil {
+		delegation.TeamID = record.TeamID
+	}
+
+	if delegation.Base.ID == "" {
+		return db.Create(&delegation).Error
+	}
+	return db.Save(&delegation).Error
+}
+
+func (s *SyncService) applyWorkflow(record SyncRecord, userID uint, payload datatypes.JSON, db *gorm.DB) error {
+	var data map[string]interface{}
+	_ = json.Unmarshal(record.Payload, &data)
+
+	workflowID := record.EntityID
+	if v, ok := data["id"].(string); ok {
+		workflowID = v
+	} else if v, ok := data["workflow_id"].(string); ok {
+		workflowID = v
+	}
+
+	if record.Action == "delete" {
+		return ownerScope(db, userID, record.TeamID).
+			Where("workflow_id = ?", workflowID).Delete(&models.Workflow{}).Error
+	}
+
+	var wf models.Workflow
+	err := ownerScope(db, userID, record.TeamID).Where("workflow_id = ?", workflowID).First(&wf).Error
+	if err == nil && int64(wf.Version) >= record.Version {
+		return nil
+	}
+
+	wf.UserID = userID
+	wf.WorkflowID = workflowID
+	wf.Version = int(record.Version)
+	wf.Meta = payload
+	if v, ok := data["project_id"].(string); ok {
+		wf.ProjectSlug = v
+		ensureProject(db, userID, record.TeamID, v)
+	}
+	if v, ok := data["name"].(string); ok {
+		wf.Name = v
+	}
+	if v, ok := data["description"].(string); ok {
+		wf.Description = v
+	}
+	if v, ok := data["initial_state"].(string); ok {
+		wf.InitialState = v
+	}
+	if v, ok := data["is_default"].(bool); ok {
+		wf.IsDefault = v
+	}
+	if v, ok := data["states"]; ok {
+		b, _ := json.Marshal(v)
+		wf.States = datatypes.JSON(b)
+	}
+	if v, ok := data["transitions"]; ok {
+		b, _ := json.Marshal(v)
+		wf.Transitions = datatypes.JSON(b)
+	}
+	if v, ok := data["gates"]; ok {
+		b, _ := json.Marshal(v)
+		wf.Gates = datatypes.JSON(b)
+	}
+	if record.TeamID != nil {
+		wf.TeamID = record.TeamID
+	}
+
+	if wf.Base.ID == "" {
+		return db.Create(&wf).Error
+	}
+	return db.Save(&wf).Error
+}
+
 func (s *SyncService) applyDoc(record SyncRecord, userID uint, payload datatypes.JSON, db *gorm.DB) error {
 	var data map[string]interface{}
 	_ = json.Unmarshal(record.Payload, &data)
@@ -595,12 +994,12 @@ func (s *SyncService) applyDoc(record SyncRecord, userID uint, payload datatypes
 	}
 
 	if record.Action == "delete" {
-		return db.Where("doc_id = ? AND user_id = ?", docID, userID).
-			Delete(&models.Doc{}).Error
+		return ownerScope(db, userID, record.TeamID).
+			Where("doc_id = ?", docID).Delete(&models.Doc{}).Error
 	}
 
 	var doc models.Doc
-	err := db.Where("doc_id = ? AND user_id = ?", docID, userID).First(&doc).Error
+	err := ownerScope(db, userID, record.TeamID).Where("doc_id = ?", docID).First(&doc).Error
 	if err == nil && int64(doc.Version) >= record.Version {
 		return nil
 	}
@@ -611,6 +1010,7 @@ func (s *SyncService) applyDoc(record SyncRecord, userID uint, payload datatypes
 	doc.Meta = payload
 	if v, ok := data["project_slug"].(string); ok {
 		doc.ProjectSlug = v
+		ensureProject(db, userID, record.TeamID, v)
 	}
 	if v, ok := data["title"].(string); ok {
 		doc.Title = v

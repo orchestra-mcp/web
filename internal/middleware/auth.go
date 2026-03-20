@@ -160,3 +160,38 @@ func CurrentUser(c fiber.Ctx) *models.User {
 	}
 	return nil
 }
+
+// OptionalCurrentUser tries to extract a user from the Authorization header
+// on public routes (where auth middleware doesn't run). Returns nil on failure.
+func OptionalCurrentUser(c fiber.Ctx, db *gorm.DB) *models.User {
+	auth := c.Get("Authorization")
+	if auth == "" {
+		return nil
+	}
+	parts := strings.SplitN(auth, " ", 2)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "bearer") {
+		return nil
+	}
+	tokenStr := parts[1]
+	if tokenStr == "" || strings.HasPrefix(tokenStr, "orch_") {
+		return nil
+	}
+
+	cfg := config.Load()
+	claims := &Claims{}
+	token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fiber.NewError(fiber.StatusUnauthorized, "bad method")
+		}
+		return []byte(cfg.JWTSecret), nil
+	})
+	if err != nil || !token.Valid {
+		return nil
+	}
+
+	var user models.User
+	if err := db.First(&user, claims.UserID).Error; err != nil {
+		return nil
+	}
+	return &user
+}
