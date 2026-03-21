@@ -240,36 +240,40 @@ func quote(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
-// normalizeValue fixes two type mismatches between Flutter SQLite and PostgreSQL:
+// normalizeValue fixes type mismatches between Flutter SQLite and PostgreSQL:
 //
-//  1. Booleans: JSON numbers 0/1 → Go bool (pgx binary protocol requires bool, not int, for bool columns).
-//  2. Arrays: comma-separated strings like "ibs,gerd" → PostgreSQL array literal "{ibs,gerd}"
-//     (PowerSync stores text[] columns as CSV strings in SQLite; PostgreSQL requires {} syntax).
+//  1. Integers: JSON float64 values that are whole numbers (0.0, 1.0, 2.0 …) are converted
+//     to int64. This lets PostgreSQL implicitly cast to the correct column type:
+//     - int64 → boolean: PostgreSQL accepts 0/1 as false/true via text protocol.
+//     - int64 → real/float4: PostgreSQL implicitly widens integer to float.
+//     - int64 → bigint: exact match.
+//     Sending float64(0) directly would cause pgx to bind it as float8, which PostgreSQL
+//     cannot implicitly cast to boolean or float4 in binary protocol.
+//
+//  2. Arrays: comma-separated strings like "ibs,gerd" → PostgreSQL array literal {"ibs","gerd"}.
+//     Empty string → NULL (avoids "malformed array literal" for text[] columns).
+//     PowerSync stores text[] columns as CSV in SQLite; PostgreSQL requires {} syntax.
 func normalizeValue(v interface{}) interface{} {
 	switch val := v.(type) {
 	case float64:
-		if val == 0 {
-			return false
-		}
-		if val == 1 {
-			return true
-		}
-	case float32:
-		if val == 0 {
-			return false
-		}
-		if val == 1 {
-			return true
+		// Convert whole-number floats to int64 so pgx binds them as int8 OID.
+		// PostgreSQL can implicitly cast int8 to boolean, real, float8, bigint, etc.
+		if val == float64(int64(val)) {
+			return int64(val)
 		}
 	case string:
+		// Empty string on a text[] column causes "malformed array literal: """.
+		// Convert to NULL so the column uses its default or stays empty.
+		if val == "" {
+			return nil
+		}
 		// Convert CSV strings to PostgreSQL array literals.
-		// Only do this when the string looks like a CSV list (contains comma, no braces).
+		// Only when the string contains a comma and doesn't already use {} syntax.
 		if strings.Contains(val, ",") && !strings.HasPrefix(val, "{") {
 			parts := strings.Split(val, ",")
 			quoted := make([]string, len(parts))
 			for i, p := range parts {
 				p = strings.TrimSpace(p)
-				// Escape any double quotes inside the element.
 				p = strings.ReplaceAll(p, `"`, `\"`)
 				quoted[i] = `"` + p + `"`
 			}
