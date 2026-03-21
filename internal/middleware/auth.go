@@ -92,7 +92,7 @@ func authenticateAPIKey(db *gorm.DB, token string) (*models.User, error) {
 
 	// Query users whose settings JSON contains this hash.
 	var users []models.User
-	if err := db.Where("settings LIKE ?", "%"+keyHash+"%").Find(&users).Error; err != nil {
+	if err := db.Where("settings::text LIKE ?", "%"+keyHash+"%").Find(&users).Error; err != nil {
 		return nil, err
 	}
 
