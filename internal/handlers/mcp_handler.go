@@ -95,35 +95,43 @@ func (h *MCPHandler) GetProfile(c fiber.Ctx) error {
 // PatchProfile handles PATCH /api/mcp/profile
 // Called by cloud-mcp service to update profile fields.
 func (h *MCPHandler) PatchProfile(c fiber.Ctx) error {
-	var body struct {
-		UserID         uint   `json:"user_id"`
-		Name           string `json:"name"`
-		Timezone       string `json:"timezone"`
-		GithubUsername string `json:"github_username"`
-		Bio            string `json:"bio"`
-	}
-	if err := c.Bind().JSON(&body); err != nil {
+	// Use a raw map so we can detect which fields were actually provided.
+	var body map[string]interface{}
+	if err := json.Unmarshal(c.Body(), &body); err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid body"})
 	}
-	if body.UserID == 0 {
+
+	userIDRaw, ok := body["user_id"]
+	if !ok {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user_id required"})
+	}
+	// JSON numbers decode as float64.
+	var userID uint
+	switch v := userIDRaw.(type) {
+	case float64:
+		userID = uint(v)
+	case uint:
+		userID = v
+	}
+	if userID == 0 {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "user_id required"})
 	}
 
 	var user models.User
-	if err := h.db.First(&user, body.UserID).Error; err != nil {
+	if err := h.db.First(&user, userID).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "user not found"})
 	}
 
-	// Update name directly on the user record.
+	// Update top-level user columns.
 	updates := map[string]interface{}{}
-	if body.Name != "" {
-		updates["name"] = body.Name
+	if v, ok := body["name"].(string); ok && v != "" {
+		updates["name"] = v
 	}
 	if len(updates) > 0 {
 		h.db.Model(&user).Updates(updates)
 	}
 
-	// Update settings JSON fields.
+	// Load existing settings JSON so we don't overwrite unrelated keys.
 	var settings map[string]interface{}
 	if len(user.Settings) > 0 {
 		json.Unmarshal(user.Settings, &settings)
@@ -131,19 +139,37 @@ func (h *MCPHandler) PatchProfile(c fiber.Ctx) error {
 	if settings == nil {
 		settings = map[string]interface{}{}
 	}
+
 	changed := false
-	if body.Timezone != "" {
-		settings["timezone"] = body.Timezone
-		changed = true
+
+	// String fields stored in settings.
+	for _, key := range []string{"timezone", "github_username", "bio", "handle", "cover_url", "phone", "gender", "position"} {
+		if v, ok := body[key].(string); ok && v != "" {
+			settings[key] = v
+			changed = true
+		}
 	}
-	if body.GithubUsername != "" {
-		settings["github_username"] = body.GithubUsername
-		changed = true
+
+	// Boolean fields stored in settings.
+	for _, key := range []string{
+		"public_profile_enabled",
+		"show_badges", "show_wallet", "show_teams",
+		"show_sponsors", "show_comments_on_profile",
+	} {
+		if v, ok := body[key]; ok && v != nil {
+			settings[key] = v
+			changed = true
+		}
 	}
-	if body.Bio != "" {
-		settings["bio"] = body.Bio
-		changed = true
+
+	// Object fields stored in settings (social_links, appearance).
+	for _, key := range []string{"social_links", "appearance"} {
+		if v, ok := body[key]; ok && v != nil {
+			settings[key] = v
+			changed = true
+		}
 	}
+
 	if changed {
 		b, _ := json.Marshal(settings)
 		h.db.Model(&user).Update("settings", string(b))
