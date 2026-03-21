@@ -136,19 +136,29 @@ func (h *PowerSyncCrudHandler) handlePut(tx *gorm.DB, userID uint, op CrudOp) er
 	sort.Strings(keys)
 
 	cols := make([]string, 0, len(keys))
-	vals := make([]interface{}, 0, len(keys))
+	insertVals := make([]interface{}, 0, len(keys))   // args for INSERT VALUES (non-NULL only)
 	placeholders := make([]string, 0, len(keys))
-	updateCols := make([]string, 0, len(keys))
-	updateVals := make([]interface{}, 0, len(keys))
+	updateCols := make([]string, 0, len(keys))        // SET col = EXCLUDED.col
+	fallbackSets := make([]string, 0, len(keys))      // SET col = ?::text for fallback UPDATE
+	fallbackVals := make([]interface{}, 0, len(keys)) // args for fallback UPDATE (non-NULL only)
 
 	for _, k := range keys {
-		v := normalizeValue(data[k])
+		v := toTextParam(data[k])
 		cols = append(cols, quote(k))
-		vals = append(vals, v)
-		placeholders = append(placeholders, "?")
+		if v == nil {
+			placeholders = append(placeholders, "NULL")
+		} else {
+			placeholders = append(placeholders, "?::text")
+			insertVals = append(insertVals, v)
+		}
 		if k != "id" {
 			updateCols = append(updateCols, fmt.Sprintf("%s = EXCLUDED.%s", quote(k), quote(k)))
-			updateVals = append(updateVals, v)
+			if v == nil {
+				fallbackSets = append(fallbackSets, fmt.Sprintf("%s = NULL", quote(k)))
+			} else {
+				fallbackSets = append(fallbackSets, fmt.Sprintf("%s = ?::text", quote(k)))
+				fallbackVals = append(fallbackVals, v)
+			}
 		}
 	}
 
@@ -162,20 +172,14 @@ func (h *PowerSyncCrudHandler) handlePut(tx *gorm.DB, userID uint, op CrudOp) er
 	)
 
 	// If the upsert fails (rare: unique constraint on non-id columns), fall back to plain UPDATE.
-	if err := tx.Exec(sql, vals...).Error; err != nil {
-		setCols := make([]string, 0, len(updateCols))
-		for _, k := range keys {
-			if k != "id" {
-				setCols = append(setCols, fmt.Sprintf("%s = ?", quote(k)))
-			}
-		}
+	if err := tx.Exec(sql, insertVals...).Error; err != nil {
 		updateSql := fmt.Sprintf(
 			"UPDATE %s SET %s WHERE id = ?",
 			quote(op.Table),
-			strings.Join(setCols, ", "),
+			strings.Join(fallbackSets, ", "),
 		)
-		updateVals = append(updateVals, op.ID)
-		return tx.Exec(updateSql, updateVals...).Error
+		fallbackVals = append(fallbackVals, op.ID)
+		return tx.Exec(updateSql, fallbackVals...).Error
 	}
 	return nil
 }
@@ -190,8 +194,13 @@ func (h *PowerSyncCrudHandler) handlePatch(tx *gorm.DB, userID uint, op CrudOp) 
 	vals := make([]interface{}, 0, len(data)+2)
 
 	for k, v := range data {
-		sets = append(sets, fmt.Sprintf("%s = ?", quote(k)))
-		vals = append(vals, normalizeValue(v))
+		p := toTextParam(v)
+		if p == nil {
+			sets = append(sets, fmt.Sprintf("%s = NULL", quote(k)))
+		} else {
+			sets = append(sets, fmt.Sprintf("%s = ?::text", quote(k)))
+			vals = append(vals, p)
+		}
 	}
 
 	vals = append(vals, op.ID, userID)
@@ -240,35 +249,42 @@ func quote(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
-// normalizeValue fixes type mismatches between Flutter SQLite and PostgreSQL:
+// toTextParam converts a value to a string for use with ?::text placeholders.
+// PostgreSQL's text input parser handles all type coercion server-side, avoiding
+// pgx binary protocol mismatches (e.g. int64→bool OID 16, float64→float4 OID 700).
 //
-//  1. Integers: JSON float64 values that are whole numbers (0.0, 1.0, 2.0 …) are converted
-//     to int64. This lets PostgreSQL implicitly cast to the correct column type:
-//     - int64 → boolean: PostgreSQL accepts 0/1 as false/true via text protocol.
-//     - int64 → real/float4: PostgreSQL implicitly widens integer to float.
-//     - int64 → bigint: exact match.
-//     Sending float64(0) directly would cause pgx to bind it as float8, which PostgreSQL
-//     cannot implicitly cast to boolean or float4 in binary protocol.
-//
-//  2. Arrays: comma-separated strings like "ibs,gerd" → PostgreSQL array literal {"ibs","gerd"}.
-//     Empty string → NULL (avoids "malformed array literal" for text[] columns).
-//     PowerSync stores text[] columns as CSV in SQLite; PostgreSQL requires {} syntax.
-func normalizeValue(v interface{}) interface{} {
+// Conversions:
+//   - nil → nil (passed through as NULL)
+//   - float64 whole numbers → "0", "1", "250" (PostgreSQL casts to bool/int/float as needed)
+//   - float64 fractional → "0.5", "1.25" etc.
+//   - bool → "true" / "false"
+//   - CSV string "a,b" → PostgreSQL array literal {"a","b"} (text[] columns)
+//   - empty string → nil (NULL — avoids "malformed array literal: """ on text[] columns)
+//   - everything else → fmt.Sprint(v)
+func toTextParam(v interface{}) interface{} {
+	if v == nil {
+		return nil
+	}
 	switch val := v.(type) {
 	case float64:
-		// Convert whole-number floats to int64 so pgx binds them as int8 OID.
-		// PostgreSQL can implicitly cast int8 to boolean, real, float8, bigint, etc.
 		if val == float64(int64(val)) {
-			return int64(val)
+			return fmt.Sprintf("%d", int64(val))
 		}
+		return fmt.Sprintf("%g", val)
+	case float32:
+		if val == float32(int32(val)) {
+			return fmt.Sprintf("%d", int32(val))
+		}
+		return fmt.Sprintf("%g", val)
+	case bool:
+		if val {
+			return "true"
+		}
+		return "false"
 	case string:
-		// Empty string on a text[] column causes "malformed array literal: """.
-		// Convert to NULL so the column uses its default or stays empty.
 		if val == "" {
 			return nil
 		}
-		// Convert CSV strings to PostgreSQL array literals.
-		// Only when the string contains a comma and doesn't already use {} syntax.
 		if strings.Contains(val, ",") && !strings.HasPrefix(val, "{") {
 			parts := strings.Split(val, ",")
 			quoted := make([]string, len(parts))
@@ -279,6 +295,8 @@ func normalizeValue(v interface{}) interface{} {
 			}
 			return "{" + strings.Join(quoted, ",") + "}"
 		}
+		return val
+	default:
+		return fmt.Sprint(v)
 	}
-	return v
 }
