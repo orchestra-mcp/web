@@ -151,5 +151,6 @@ func (h *PowerSyncHandler) Token(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"token":      signed,
 		"expires_at": now.Add(1 * time.Hour).Unix(),
+		"user_id":    fmt.Sprintf("%d", user.ID),
 	})
 }
