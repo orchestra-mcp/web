@@ -223,6 +223,7 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	protected.Post("/blog/:slug/comments", commentHandler.Create)
 
 	// System docs (auth required for editing)
+	protected.Post("/docs", docHandler.SystemCreate)
 	protected.Put("/docs/:id", docHandler.SystemUpdate)
 	protected.Patch("/docs/:id", docHandler.SystemUpdate) // alias for frontend compat
 	protected.Patch("/docs/:id/pin", docHandler.SystemPin)

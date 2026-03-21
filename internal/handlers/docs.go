@@ -108,6 +108,76 @@ func (h *DocHandler) SystemShow(c fiber.Ctx) error {
 	return c.JSON(doc)
 }
 
+// SystemCreate creates a new system doc.
+// Auth required (admin).
+// POST /api/docs
+func (h *DocHandler) SystemCreate(c fiber.Ctx) error {
+	user := middleware.CurrentUser(c)
+	if user == nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "unauthorized"})
+	}
+
+	var body struct {
+		Title     string  `json:"title"`
+		Body      string  `json:"body"`
+		Category  string  `json:"category"`
+		Icon      string  `json:"icon"`
+		Color     string  `json:"color"`
+		Pinned    bool    `json:"pinned"`
+		Published bool    `json:"published"`
+		DocID     *string `json:"doc_id"`
+	}
+	if err := c.Bind().JSON(&body); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid request body"})
+	}
+	if body.Title == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "title is required"})
+	}
+
+	// Auto-generate doc_id from title if not provided.
+	docID := ""
+	if body.DocID != nil && *body.DocID != "" {
+		docID = *body.DocID
+	} else {
+		// Simple slug: lowercase, replace spaces with dashes, strip non-alphanum.
+		slug := body.Title
+		result := make([]byte, 0, len(slug))
+		for _, ch := range slug {
+			if ch >= 'a' && ch <= 'z' {
+				result = append(result, byte(ch))
+			} else if ch >= 'A' && ch <= 'Z' {
+				result = append(result, byte(ch+32))
+			} else if ch == ' ' || ch == '-' || ch == '_' {
+				result = append(result, '-')
+			}
+		}
+		docID = string(result)
+	}
+
+	doc := models.Doc{
+		UserID:      0, // system doc
+		ProjectSlug: "_system",
+		DocID:       docID,
+		Title:       body.Title,
+		Body:        body.Body,
+		Category:    body.Category,
+		Icon:        body.Icon,
+		Color:       body.Color,
+		Pinned:      body.Pinned,
+		Published:   body.Published,
+		Version:     1,
+	}
+
+	if err := h.db.Create(&doc).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create doc"})
+	}
+
+	if h.hub != nil {
+		broadcastSync(h.hub, user.ID, "doc", doc.DocID, "upsert")
+	}
+	return c.Status(fiber.StatusCreated).JSON(doc)
+}
+
 // SystemUpdate updates fields of a system doc (title, body, icon, color).
 // Auth required.
 // PUT /api/docs/:id
