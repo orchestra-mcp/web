@@ -118,6 +118,9 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	api.Get("/mcp/profile", mcpHandler.GetProfile)
 	api.Patch("/mcp/profile", mcpHandler.PatchProfile)
 
+	// Public profile about page (no auth — /@handle/about).
+	api.Get("/public/profile/:handle/about", mcpHandler.GetPublicAbout)
+
 	// Public settings (no auth — used by Next.js middleware for coming soon check).
 	// Uses /public/settings/ prefix to avoid collision with /settings/preferences etc.
 	api.Get("/public/settings/:key", adminSettingsHandler.GetPublicSetting)

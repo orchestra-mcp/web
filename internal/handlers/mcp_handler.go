@@ -75,6 +75,11 @@ func (h *MCPHandler) GetProfile(c fiber.Ctx) error {
 	if h2, ok := settings["handle"].(string); ok {
 		handle = h2
 	}
+	about := ""
+	if a, ok := settings["about"].(string); ok {
+		about = a
+	}
+	socialLinks := settings["social_links"]
 
 	return c.JSON(fiber.Map{
 		"id":              user.ID,
@@ -86,9 +91,59 @@ func (h *MCPHandler) GetProfile(c fiber.Ctx) error {
 		"timezone":        timezone,
 		"github_username": githubUsername,
 		"bio":             bio,
+		"about":           about,
 		"handle":          handle,
+		"social_links":    socialLinks,
 		"avatar_url":      user.AvatarURL,
 		"is_verified":     user.IsVerified,
+	})
+}
+
+// GetPublicAbout handles GET /api/public/profile/:handle/about
+// Returns the public about page (markdown) for a user by handle. No auth required.
+func (h *MCPHandler) GetPublicAbout(c fiber.Ctx) error {
+	handle := c.Params("handle")
+	if handle == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "handle required"})
+	}
+
+	// Find user by handle stored in settings JSON.
+	var users []models.User
+	h.db.Find(&users)
+	var found *models.User
+	for i := range users {
+		var s map[string]interface{}
+		if json.Unmarshal(users[i].Settings, &s) == nil {
+			if h2, ok := s["handle"].(string); ok && h2 == handle {
+				found = &users[i]
+				break
+			}
+		}
+	}
+	if found == nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "profile not found"})
+	}
+
+	var settings map[string]interface{}
+	json.Unmarshal(found.Settings, &settings)
+
+	// Respect public_profile_enabled toggle.
+	if enabled, ok := settings["public_profile_enabled"].(bool); ok && !enabled {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{"error": "profile not found"})
+	}
+
+	about, _ := settings["about"].(string)
+	bio, _ := settings["bio"].(string)
+	socialLinks := settings["social_links"]
+
+	return c.JSON(fiber.Map{
+		"handle":       handle,
+		"name":         found.Name,
+		"bio":          bio,
+		"about":        about,
+		"social_links": socialLinks,
+		"avatar_url":   found.AvatarURL,
+		"is_verified":  found.IsVerified,
 	})
 }
 
@@ -143,7 +198,7 @@ func (h *MCPHandler) PatchProfile(c fiber.Ctx) error {
 	changed := false
 
 	// String fields stored in settings.
-	for _, key := range []string{"timezone", "github_username", "bio", "handle", "cover_url", "phone", "gender", "position"} {
+	for _, key := range []string{"timezone", "github_username", "bio", "about", "handle", "cover_url", "phone", "gender", "position"} {
 		if v, ok := body[key].(string); ok && v != "" {
 			settings[key] = v
 			changed = true
