@@ -160,9 +160,10 @@ func Register(app *fiber.App, db *gorm.DB, cfg *config.Config, wsMgr ...*service
 	api.Get("/public/presentations/:handle", presentationHandler.PublicList)
 	api.Get("/public/presentations/:handle/:slug", presentationHandler.PublicShow)
 
-	// Public sponsors & issues (no auth)
+	// Public sponsors, issues & blog posts (no auth)
 	api.Get("/public/sponsors", adminCmsHandler.PublicSponsors)
 	api.Get("/public/issues", adminCmsHandler.PublicIssues)
+	api.Get("/public/blog", adminCmsHandler.PublicPosts)
 
 	// Public Open Graph preview (no auth — fetches OG metadata for link cards).
 	api.Get("/og-preview", ogPreviewHandler.Preview)

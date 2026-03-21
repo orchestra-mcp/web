@@ -991,6 +991,52 @@ func (h *AdminCmsHandler) PublicSponsors(c fiber.Ctx) error {
 	return c.JSON(fiber.Map{"sponsors": sponsors})
 }
 
+// PublicPosts handles GET /api/public/blog — returns published blog posts from DB.
+func (h *AdminCmsHandler) PublicPosts(c fiber.Ctx) error {
+	var posts []models.Post
+	h.db.Where("status = ?", "published").Order("published_at DESC, created_at DESC").Find(&posts)
+
+	locale := helpers.ContentLocale(c)
+	type postDTO struct {
+		ID        uint   `json:"id"`
+		Slug      string `json:"slug"`
+		Title     string `json:"title"`
+		Excerpt   string `json:"excerpt"`
+		Tag       string `json:"tag"`
+		Date      string `json:"date"`
+		ReadTime  string `json:"read_time"`
+	}
+	result := make([]postDTO, 0, len(posts))
+	for _, p := range posts {
+		title := p.Title
+		excerpt := p.Excerpt
+		if locale != helpers.DefaultLocale {
+			if tr := helpers.ResolveTranslation(p.Translations, locale); tr != nil {
+				if v, ok := tr["title"].(string); ok && v != "" {
+					title = v
+				}
+				if v, ok := tr["excerpt"].(string); ok && v != "" {
+					excerpt = v
+				}
+			}
+		}
+		date := ""
+		if p.PublishedAt != nil {
+			date = p.PublishedAt.Format("Jan 02, 2006")
+		} else {
+			date = p.CreatedAt.Format("Jan 02, 2006")
+		}
+		result = append(result, postDTO{
+			ID:      p.ID,
+			Slug:    p.Slug,
+			Title:   title,
+			Excerpt: excerpt,
+			Date:    date,
+		})
+	}
+	return c.JSON(fiber.Map{"posts": result})
+}
+
 // PublicIssues handles GET /api/public/issues
 func (h *AdminCmsHandler) PublicIssues(c fiber.Ctx) error {
 	var issues []models.GitHubIssue

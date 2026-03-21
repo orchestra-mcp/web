@@ -48,6 +48,7 @@ func (h *SettingsHandler) UpdateProfile(c fiber.Ctx) error {
 		Position             string        `json:"position"`
 		Timezone             string        `json:"timezone"`
 		Bio                  string        `json:"bio"`
+		About                string        `json:"about"`
 		PublicProfileEnabled *bool         `json:"public_profile_enabled,omitempty"`
 		Handle               *string       `json:"handle,omitempty"`
 		CoverURL             *string       `json:"cover_url,omitempty"`
@@ -76,6 +77,7 @@ func (h *SettingsHandler) UpdateProfile(c fiber.Ctx) error {
 	settings["position"] = body.Position
 	settings["timezone"] = body.Timezone
 	settings["bio"] = body.Bio
+	settings["about"] = body.About
 
 	// Public profile fields (only set if provided)
 	if body.PublicProfileEnabled != nil {

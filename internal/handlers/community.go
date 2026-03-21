@@ -269,6 +269,7 @@ profileFound:
 			"avatar_url":   row.AvatarURL,
 			"cover_url":    row.CoverURL,
 			"bio":          row.Bio,
+			"about":        listUserSettings(json.RawMessage(user.Settings), "about"),
 			"role":         row.Role,
 			"location":     listUserSettings(json.RawMessage(user.Settings), "location"),
 			"joined_at":    row.JoinedAt,
