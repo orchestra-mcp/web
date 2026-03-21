@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/gofiber/fiber/v3"
@@ -127,22 +128,31 @@ func (h *PowerSyncCrudHandler) handlePut(tx *gorm.DB, userID uint, op CrudOp) er
 	data["id"] = op.ID
 	data["user_id"] = userID
 
-	cols := make([]string, 0, len(data))
-	vals := make([]interface{}, 0, len(data))
-	placeholders := make([]string, 0, len(data))
-	updateCols := make([]string, 0, len(data))
+	// Stable key ordering so cols/vals/placeholders/updateCols all align.
+	keys := make([]string, 0, len(data))
+	for k := range data {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
 
-	for k, v := range data {
+	cols := make([]string, 0, len(keys))
+	vals := make([]interface{}, 0, len(keys))
+	placeholders := make([]string, 0, len(keys))
+	updateCols := make([]string, 0, len(keys))
+	updateVals := make([]interface{}, 0, len(keys))
+
+	for _, k := range keys {
+		v := normalizeBool(data[k])
 		cols = append(cols, quote(k))
 		vals = append(vals, v)
 		placeholders = append(placeholders, "?")
 		if k != "id" {
 			updateCols = append(updateCols, fmt.Sprintf("%s = EXCLUDED.%s", quote(k), quote(k)))
+			updateVals = append(updateVals, v)
 		}
 	}
 
-	// UPSERT: INSERT ... ON CONFLICT (id) DO UPDATE
-	// Use DO UPDATE SET ... to handle both id conflicts and unique constraint conflicts.
+	// UPSERT: INSERT ... ON CONFLICT (id) DO UPDATE SET ... (EXCLUDED is valid here).
 	sql := fmt.Sprintf(
 		"INSERT INTO %s (%s) VALUES (%s) ON CONFLICT (id) DO UPDATE SET %s",
 		quote(op.Table),
@@ -151,20 +161,19 @@ func (h *PowerSyncCrudHandler) handlePut(tx *gorm.DB, userID uint, op CrudOp) er
 		strings.Join(updateCols, ", "),
 	)
 
-	// If the initial upsert fails (e.g. unique constraint on non-id columns),
-	// fall back to a plain UPDATE.
+	// If the upsert fails (rare: unique constraint on non-id columns), fall back to plain UPDATE.
 	if err := tx.Exec(sql, vals...).Error; err != nil {
+		setCols := make([]string, 0, len(updateCols))
+		for _, k := range keys {
+			if k != "id" {
+				setCols = append(setCols, fmt.Sprintf("%s = ?", quote(k)))
+			}
+		}
 		updateSql := fmt.Sprintf(
 			"UPDATE %s SET %s WHERE id = ?",
 			quote(op.Table),
-			strings.Join(updateCols, ", "),
+			strings.Join(setCols, ", "),
 		)
-		updateVals := make([]interface{}, 0, len(data))
-		for k, v := range data {
-			if k != "id" {
-				updateVals = append(updateVals, v)
-			}
-		}
 		updateVals = append(updateVals, op.ID)
 		return tx.Exec(updateSql, updateVals...).Error
 	}
@@ -182,7 +191,7 @@ func (h *PowerSyncCrudHandler) handlePatch(tx *gorm.DB, userID uint, op CrudOp) 
 
 	for k, v := range data {
 		sets = append(sets, fmt.Sprintf("%s = ?", quote(k)))
-		vals = append(vals, v)
+		vals = append(vals, normalizeBool(v))
 	}
 
 	vals = append(vals, op.ID, userID)
@@ -229,4 +238,28 @@ func cleanData(data map[string]interface{}) map[string]interface{} {
 // quote wraps a column/table name in double quotes for PostgreSQL.
 func quote(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+}
+
+// normalizeBool converts numeric 0/1 values to Go bool so pgx can encode
+// them into PostgreSQL boolean columns (binary protocol can't encode int as bool).
+func normalizeBool(v interface{}) interface{} {
+	switch val := v.(type) {
+	case float64:
+		// JSON numbers arrive as float64; if it's exactly 0 or 1 it may be a bool column.
+		// We can't know the schema, so only convert 0.0/1.0 — other floats are left alone.
+		if val == 0 {
+			return false
+		}
+		if val == 1 {
+			return true
+		}
+	case float32:
+		if val == 0 {
+			return false
+		}
+		if val == 1 {
+			return true
+		}
+	}
+	return v
 }
