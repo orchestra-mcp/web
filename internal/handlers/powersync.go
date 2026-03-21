@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/base64"
+	"fmt"
 	"math/big"
 	"sync"
 	"time"
@@ -78,11 +79,11 @@ func (h *PowerSyncHandler) Token(c fiber.Ctx) error {
 
 	now := time.Now()
 	psClaims := jwt.MapClaims{
-		"sub":     user.ID,
+		"sub":     fmt.Sprintf("%d", user.ID),
 		"iat":     now.Unix(),
 		"exp":     now.Add(1 * time.Hour).Unix(),
 		"aud":     "powersync",
-		"user_id": user.ID,
+		"user_id": fmt.Sprintf("%d", user.ID),
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodRS256, psClaims)
