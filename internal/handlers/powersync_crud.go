@@ -5,20 +5,65 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"sync"
 
 	"github.com/gofiber/fiber/v3"
 	"github.com/orchestra-mcp/web/internal/middleware"
 	"gorm.io/gorm"
 )
 
+// columnType holds the PostgreSQL type name and whether it is an array.
+type columnType struct {
+	pgType  string // e.g. "bool", "int8", "float4", "text", "_text"
+	isArray bool
+}
+
 // PowerSyncCrudHandler handles batch CRUD uploads from PowerSync clients.
 // This replaces per-table API mapping — all local writes go through one endpoint.
 type PowerSyncCrudHandler struct {
-	db *gorm.DB
+	db         *gorm.DB
+	schemaMu   sync.RWMutex
+	schemaCache map[string]map[string]columnType // table → column → type
 }
 
 func NewPowerSyncCrudHandler(db *gorm.DB) *PowerSyncCrudHandler {
-	return &PowerSyncCrudHandler{db: db}
+	return &PowerSyncCrudHandler{
+		db:          db,
+		schemaCache: make(map[string]map[string]columnType),
+	}
+}
+
+// tableSchema returns the column type map for a table, fetching from PostgreSQL if needed.
+func (h *PowerSyncCrudHandler) tableSchema(table string) map[string]columnType {
+	h.schemaMu.RLock()
+	m, ok := h.schemaCache[table]
+	h.schemaMu.RUnlock()
+	if ok {
+		return m
+	}
+
+	type row struct {
+		Column  string `gorm:"column:column_name"`
+		PgType  string `gorm:"column:udt_name"`
+	}
+	var rows []row
+	h.db.Raw(`
+		SELECT column_name, udt_name
+		FROM information_schema.columns
+		WHERE table_schema = 'public' AND table_name = ?`, table).Scan(&rows)
+
+	m = make(map[string]columnType, len(rows))
+	for _, r := range rows {
+		m[r.Column] = columnType{
+			pgType:  r.PgType,
+			isArray: strings.HasPrefix(r.PgType, "_"),
+		}
+	}
+
+	h.schemaMu.Lock()
+	h.schemaCache[table] = m
+	h.schemaMu.Unlock()
+	return m
 }
 
 // CrudOp represents a single CRUD operation from PowerSync.
@@ -128,6 +173,8 @@ func (h *PowerSyncCrudHandler) handlePut(tx *gorm.DB, userID uint, op CrudOp) er
 	data["id"] = op.ID
 	data["user_id"] = userID
 
+	schema := h.tableSchema(op.Table)
+
 	// Stable key ordering so cols/vals/placeholders/updateCols all align.
 	keys := make([]string, 0, len(data))
 	for k := range data {
@@ -136,19 +183,19 @@ func (h *PowerSyncCrudHandler) handlePut(tx *gorm.DB, userID uint, op CrudOp) er
 	sort.Strings(keys)
 
 	cols := make([]string, 0, len(keys))
-	insertVals := make([]interface{}, 0, len(keys))   // args for INSERT VALUES (non-NULL only)
+	insertVals := make([]interface{}, 0, len(keys))
 	placeholders := make([]string, 0, len(keys))
-	updateCols := make([]string, 0, len(keys))        // SET col = EXCLUDED.col
-	fallbackSets := make([]string, 0, len(keys))      // SET col = ?::text for fallback UPDATE
-	fallbackVals := make([]interface{}, 0, len(keys)) // args for fallback UPDATE (non-NULL only)
+	updateCols := make([]string, 0, len(keys))
+	fallbackSets := make([]string, 0, len(keys))
+	fallbackVals := make([]interface{}, 0, len(keys))
 
 	for _, k := range keys {
-		v := toTextParam(data[k])
+		v, ph := coerce(data[k], schema[k])
 		cols = append(cols, quote(k))
 		if v == nil {
 			placeholders = append(placeholders, "NULL")
 		} else {
-			placeholders = append(placeholders, "?::text")
+			placeholders = append(placeholders, ph)
 			insertVals = append(insertVals, v)
 		}
 		if k != "id" {
@@ -156,7 +203,7 @@ func (h *PowerSyncCrudHandler) handlePut(tx *gorm.DB, userID uint, op CrudOp) er
 			if v == nil {
 				fallbackSets = append(fallbackSets, fmt.Sprintf("%s = NULL", quote(k)))
 			} else {
-				fallbackSets = append(fallbackSets, fmt.Sprintf("%s = ?::text", quote(k)))
+				fallbackSets = append(fallbackSets, fmt.Sprintf("%s = %s", quote(k), ph))
 				fallbackVals = append(fallbackVals, v)
 			}
 		}
@@ -190,15 +237,16 @@ func (h *PowerSyncCrudHandler) handlePatch(tx *gorm.DB, userID uint, op CrudOp) 
 		return nil
 	}
 
+	schema := h.tableSchema(op.Table)
 	sets := make([]string, 0, len(data))
 	vals := make([]interface{}, 0, len(data)+2)
 
 	for k, v := range data {
-		p := toTextParam(v)
+		p, ph := coerce(v, schema[k])
 		if p == nil {
 			sets = append(sets, fmt.Sprintf("%s = NULL", quote(k)))
 		} else {
-			sets = append(sets, fmt.Sprintf("%s = ?::text", quote(k)))
+			sets = append(sets, fmt.Sprintf("%s = %s", quote(k), ph))
 			vals = append(vals, p)
 		}
 	}
@@ -249,54 +297,66 @@ func quote(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
-// toTextParam converts a value to a string for use with ?::text placeholders.
-// PostgreSQL's text input parser handles all type coercion server-side, avoiding
-// pgx binary protocol mismatches (e.g. int64→bool OID 16, float64→float4 OID 700).
+// coerce converts a JSON value from Flutter SQLite into a Go value and the
+// correct SQL placeholder expression for the target PostgreSQL column type.
 //
-// Conversions:
-//   - nil → nil (passed through as NULL)
-//   - float64 whole numbers → "0", "1", "250" (PostgreSQL casts to bool/int/float as needed)
-//   - float64 fractional → "0.5", "1.25" etc.
-//   - bool → "true" / "false"
-//   - CSV string "a,b" → PostgreSQL array literal {"a","b"} (text[] columns)
-//   - empty string → nil (NULL — avoids "malformed array literal: """ on text[] columns)
-//   - everything else → fmt.Sprint(v)
-func toTextParam(v interface{}) interface{} {
+// Returns (nil, "NULL") for null/empty values.
+// Returns (value, "?::pgtype") for typed values — the explicit cast tells pgx
+// which OID to use, avoiding binary-protocol mismatches (e.g. int8→bool, int8→float4).
+//
+// For array columns (udt_name starts with "_"): CSV strings like "a,b" are
+// converted to PostgreSQL array literals {"a","b"}.
+func coerce(v interface{}, ct columnType) (interface{}, string) {
 	if v == nil {
-		return nil
+		return nil, "NULL"
 	}
+
+	// Array columns: udt_name starts with "_" (e.g. "_text", "_int4").
+	// elementType is the base type without the leading "_".
+	if ct.isArray {
+		s := fmt.Sprint(v)
+		if s == "" {
+			return nil, "NULL"
+		}
+		// Already in {} form (e.g. synced back from server).
+		if strings.HasPrefix(s, "{") {
+			return s, "?::" + ct.pgType
+		}
+		// Convert CSV "a,b" → {"a","b"}.
+		parts := strings.Split(s, ",")
+		quoted := make([]string, len(parts))
+		for i, p := range parts {
+			p = strings.TrimSpace(p)
+			p = strings.ReplaceAll(p, `"`, `\"`)
+			quoted[i] = `"` + p + `"`
+		}
+		return "{" + strings.Join(quoted, ",") + "}", "?::" + ct.pgType
+	}
+
+	// Scalar columns — use the PostgreSQL udt_name for the cast.
+	pgType := ct.pgType
+	if pgType == "" {
+		pgType = "text" // unknown column: let PostgreSQL decide
+	}
+
 	switch val := v.(type) {
 	case float64:
+		// Whole numbers: format as integer string so PostgreSQL can cast to bool, int, float.
 		if val == float64(int64(val)) {
-			return fmt.Sprintf("%d", int64(val))
+			return fmt.Sprintf("%d", int64(val)), "?::" + pgType
 		}
-		return fmt.Sprintf("%g", val)
-	case float32:
-		if val == float32(int32(val)) {
-			return fmt.Sprintf("%d", int32(val))
-		}
-		return fmt.Sprintf("%g", val)
+		return fmt.Sprintf("%g", val), "?::" + pgType
 	case bool:
 		if val {
-			return "true"
+			return "true", "?::" + pgType
 		}
-		return "false"
+		return "false", "?::" + pgType
 	case string:
 		if val == "" {
-			return nil
+			return nil, "NULL"
 		}
-		if strings.Contains(val, ",") && !strings.HasPrefix(val, "{") {
-			parts := strings.Split(val, ",")
-			quoted := make([]string, len(parts))
-			for i, p := range parts {
-				p = strings.TrimSpace(p)
-				p = strings.ReplaceAll(p, `"`, `\"`)
-				quoted[i] = `"` + p + `"`
-			}
-			return "{" + strings.Join(quoted, ",") + "}"
-		}
-		return val
+		return val, "?::" + pgType
 	default:
-		return fmt.Sprint(v)
+		return fmt.Sprint(v), "?::" + pgType
 	}
 }
