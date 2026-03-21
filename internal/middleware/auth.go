@@ -101,6 +101,16 @@ func authenticateAPIKey(db *gorm.DB, token string) (*models.User, error) {
 		if err := json.Unmarshal(users[i].Settings, &meta); err != nil {
 			continue
 		}
+
+		// Check mcp_token_hash (tokens generated before api_keys migration).
+		if mcpHash, _ := meta["mcp_token_hash"].(string); mcpHash == keyHash {
+			if users[i].Status == "blocked" {
+				return nil, fiber.NewError(fiber.StatusForbidden, "account is blocked")
+			}
+			return &users[i], nil
+		}
+
+		// Check api_keys list.
 		raw, ok := meta["api_keys"]
 		if !ok {
 			continue
