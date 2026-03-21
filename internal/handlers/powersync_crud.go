@@ -142,7 +142,7 @@ func (h *PowerSyncCrudHandler) handlePut(tx *gorm.DB, userID uint, op CrudOp) er
 	updateVals := make([]interface{}, 0, len(keys))
 
 	for _, k := range keys {
-		v := normalizeBool(data[k])
+		v := normalizeValue(data[k])
 		cols = append(cols, quote(k))
 		vals = append(vals, v)
 		placeholders = append(placeholders, "?")
@@ -191,7 +191,7 @@ func (h *PowerSyncCrudHandler) handlePatch(tx *gorm.DB, userID uint, op CrudOp) 
 
 	for k, v := range data {
 		sets = append(sets, fmt.Sprintf("%s = ?", quote(k)))
-		vals = append(vals, normalizeBool(v))
+		vals = append(vals, normalizeValue(v))
 	}
 
 	vals = append(vals, op.ID, userID)
@@ -240,13 +240,14 @@ func quote(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
-// normalizeBool converts numeric 0/1 values to Go bool so pgx can encode
-// them into PostgreSQL boolean columns (binary protocol can't encode int as bool).
-func normalizeBool(v interface{}) interface{} {
+// normalizeValue fixes two type mismatches between Flutter SQLite and PostgreSQL:
+//
+//  1. Booleans: JSON numbers 0/1 → Go bool (pgx binary protocol requires bool, not int, for bool columns).
+//  2. Arrays: comma-separated strings like "ibs,gerd" → PostgreSQL array literal "{ibs,gerd}"
+//     (PowerSync stores text[] columns as CSV strings in SQLite; PostgreSQL requires {} syntax).
+func normalizeValue(v interface{}) interface{} {
 	switch val := v.(type) {
 	case float64:
-		// JSON numbers arrive as float64; if it's exactly 0 or 1 it may be a bool column.
-		// We can't know the schema, so only convert 0.0/1.0 — other floats are left alone.
 		if val == 0 {
 			return false
 		}
@@ -259,6 +260,20 @@ func normalizeBool(v interface{}) interface{} {
 		}
 		if val == 1 {
 			return true
+		}
+	case string:
+		// Convert CSV strings to PostgreSQL array literals.
+		// Only do this when the string looks like a CSV list (contains comma, no braces).
+		if strings.Contains(val, ",") && !strings.HasPrefix(val, "{") {
+			parts := strings.Split(val, ",")
+			quoted := make([]string, len(parts))
+			for i, p := range parts {
+				p = strings.TrimSpace(p)
+				// Escape any double quotes inside the element.
+				p = strings.ReplaceAll(p, `"`, `\"`)
+				quoted[i] = `"` + p + `"`
+			}
+			return "{" + strings.Join(quoted, ",") + "}"
 		}
 	}
 	return v
