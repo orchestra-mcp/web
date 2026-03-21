@@ -3,9 +3,13 @@ package handlers
 import (
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/x509"
 	"encoding/base64"
+	"encoding/pem"
 	"fmt"
 	"math/big"
+	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -30,14 +34,62 @@ func NewPowerSyncHandler(db *gorm.DB) *PowerSyncHandler {
 	return &PowerSyncHandler{db: db}
 }
 
+// ensureKey loads the persistent RSA key from disk, or generates and saves one.
+// The key is stored at $HOME/.orchestra/powersync-key.pem so it survives restarts.
 func (h *PowerSyncHandler) ensureKey() {
 	h.keyOnce.Do(func() {
+		keyPath := persistentKeyPath()
+		if key, err := loadKey(keyPath); err == nil {
+			h.privKey = key
+			h.kid = "powersync-1"
+			return
+		}
+		// Generate a new key and persist it.
 		key, err := rsa.GenerateKey(rand.Reader, 2048)
 		if err != nil {
 			panic("failed to generate RSA key for PowerSync: " + err.Error())
 		}
+		if err := saveKey(keyPath, key); err != nil {
+			// Non-fatal — key won't survive restarts but will work for this session.
+			fmt.Printf("[PowerSync] Warning: could not persist key to %s: %v\n", keyPath, err)
+		}
 		h.privKey = key
 		h.kid = "powersync-1"
+	})
+}
+
+func persistentKeyPath() string {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = "/tmp"
+	}
+	return filepath.Join(home, ".orchestra", "powersync-key.pem")
+}
+
+func loadKey(path string) (*rsa.PrivateKey, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("no PEM block found")
+	}
+	return x509.ParsePKCS1PrivateKey(block.Bytes)
+}
+
+func saveKey(path string, key *rsa.PrivateKey) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0700); err != nil {
+		return err
+	}
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer f.Close()
+	return pem.Encode(f, &pem.Block{
+		Type:  "RSA PRIVATE KEY",
+		Bytes: x509.MarshalPKCS1PrivateKey(key),
 	})
 }
 
